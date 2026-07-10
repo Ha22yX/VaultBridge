@@ -1,6 +1,8 @@
 const state = {
   jobs: [],
+  runs: [],
   selectedJobId: null,
+  page: "dashboard",
 };
 
 const $ = (id) => document.getElementById(id);
@@ -18,13 +20,7 @@ function toast(message) {
   clearTimeout(window.__toastTimer);
   window.__toastTimer = setTimeout(() => {
     node.hidden = true;
-  }, 4200);
-}
-
-function setConnectionStatus(message, kind = "") {
-  const node = $("connectionStatus");
-  node.textContent = message;
-  node.className = `status-text ${kind}`.trim();
+  }, 3600);
 }
 
 async function api(path, options = {}) {
@@ -52,18 +48,10 @@ function lines(value) {
     .filter(Boolean);
 }
 
-function uniqueLines(value, newLine) {
-  const current = lines(value);
-  if (!current.includes(newLine)) current.push(newLine);
-  return current.join("\n");
-}
-
-function setDefaults() {
-  $("includePaths").value = defaults.includePath;
-  $("excludePatterns").value = defaults.excludePatterns.join("\n");
-  $("targetPath").value = defaults.targetPath;
-  $("browsePath").value = defaults.includePath;
-  setConnectionStatus("先测试连接，再选择目录。");
+function setConnectionStatus(message, kind = "") {
+  const node = $("connectionStatus");
+  node.textContent = message;
+  node.className = `status-text ${kind}`.trim();
 }
 
 function formatSchedule(job) {
@@ -75,256 +63,12 @@ function formatSchedule(job) {
   return `每天 ${time}`;
 }
 
+function jobName(jobId) {
+  return state.jobs.find((job) => job.id === jobId)?.name || `任务 #${jobId}`;
+}
+
 function activeJob() {
   return state.jobs.find((job) => job.id === state.selectedJobId) || state.jobs[0];
-}
-
-function connectionPayload() {
-  return {
-    host: $("host").value.trim(),
-    port: Number($("port").value || 22),
-    username: $("username").value.trim(),
-    password: $("password").value,
-  };
-}
-
-function validateConnectionPayload(payload) {
-  if (!payload.host) return "请填写 SSH 地址。";
-  if (!payload.port || payload.port < 1 || payload.port > 65535) return "请填写正确的 SSH 端口。";
-  if (!payload.username) return "请填写 SSH 用户名。";
-  if (!payload.password) return "请填写 SSH 密码。编辑旧任务时，如不想重新输入密码，请用任务列表里的测试或浏览。";
-  return "";
-}
-
-function renderJobs() {
-  $("jobCount").textContent = `${state.jobs.length} 个任务`;
-  const list = $("jobsList");
-  if (!state.jobs.length) {
-    list.className = "list empty";
-    list.textContent = "还没有任务。先在左侧测试连接、选择目录，然后保存任务。";
-    return;
-  }
-
-  list.className = "list";
-  list.innerHTML = state.jobs
-    .map(
-      (job) => `
-        <div class="item">
-          <div class="item-head">
-            <div>
-              <p class="item-title">${escapeHtml(job.name)}</p>
-              <div class="meta">
-                <span>${escapeHtml(job.username)}@${escapeHtml(job.host)}:${job.port}</span>
-                <span>${formatSchedule(job)}</span>
-                <span>${job.enabled ? "已启用" : "已暂停"}</span>
-              </div>
-            </div>
-            <span class="badge">${state.selectedJobId === job.id ? "当前" : "任务"}</span>
-          </div>
-          <div class="meta">
-            <span>目录：${escapeHtml(job.include_paths.join(", "))}</span>
-            <span>目标：${escapeHtml(job.target_path)}</span>
-          </div>
-          <div class="item-actions">
-            <button class="button secondary compact" data-action="select" data-id="${job.id}" type="button">选择</button>
-            <button class="button secondary compact" data-action="edit" data-id="${job.id}" type="button">编辑</button>
-            <button class="button secondary compact" data-action="test" data-id="${job.id}" type="button">测试</button>
-            <button class="button secondary compact" data-action="browse-saved" data-id="${job.id}" type="button">浏览</button>
-            <button class="button primary compact" data-action="run" data-id="${job.id}" type="button">立即备份</button>
-            <button class="button danger compact" data-action="delete" data-id="${job.id}" type="button">删除</button>
-          </div>
-        </div>
-      `,
-    )
-    .join("");
-}
-
-function renderRuns(runs) {
-  const list = $("runsList");
-  if (!runs.length) {
-    list.className = "list empty";
-    list.textContent = "暂无运行记录。";
-    return;
-  }
-  list.className = "list";
-  list.innerHTML = runs
-    .map(
-      (run) => `
-        <div class="item">
-          <div class="item-head">
-            <p class="item-title">${escapeHtml(run.status)}</p>
-            <span class="badge">${escapeHtml(run.started_at || "")}</span>
-          </div>
-          <div class="meta">
-            <span>任务 #${run.job_id}</span>
-            <span>${escapeHtml(run.commit_hash ? run.commit_hash.slice(0, 8) : "无提交")}</span>
-          </div>
-          <div class="meta">${escapeHtml(run.message || "")}</div>
-        </div>
-      `,
-    )
-    .join("");
-}
-
-function fillForm(job) {
-  $("jobId").value = job.id;
-  $("formMode").textContent = `编辑 #${job.id}`;
-  $("name").value = job.name;
-  $("host").value = job.host;
-  $("port").value = job.port;
-  $("username").value = job.username;
-  $("password").value = "";
-  $("password").required = false;
-  $("targetPath").value = job.target_path;
-  $("includePaths").value = job.include_paths.join("\n");
-  $("excludePatterns").value = job.exclude_patterns.join("\n");
-  $("scheduleKind").value = job.schedule_kind;
-  $("dayOfWeek").value = job.day_of_week ?? 0;
-  $("timeOfDay").value = `${String(job.hour).padStart(2, "0")}:${String(job.minute).padStart(2, "0")}`;
-  $("enabled").checked = job.enabled;
-  setConnectionStatus("正在编辑已保存任务。留空密码不会覆盖旧密码。");
-}
-
-function resetForm() {
-  $("jobForm").reset();
-  $("jobId").value = "";
-  $("formMode").textContent = "新任务";
-  $("password").required = true;
-  setDefaults();
-}
-
-async function loadJobs() {
-  state.jobs = await api("/api/jobs");
-  if (!state.selectedJobId && state.jobs[0]) {
-    state.selectedJobId = state.jobs[0].id;
-  }
-  renderJobs();
-}
-
-async function loadRuns() {
-  const runs = await api("/api/runs");
-  renderRuns(runs);
-}
-
-async function loadVersions() {
-  const job = activeJob();
-  const list = $("versionsList");
-  if (!job) {
-    list.className = "list empty";
-    list.textContent = "先保存一个任务，再查看历史版本。";
-    return;
-  }
-  const versions = await api(`/api/jobs/${job.id}/versions`);
-  if (!versions.length) {
-    list.className = "list empty";
-    list.textContent = "还没有历史版本。先运行一次备份。";
-    return;
-  }
-  list.className = "list";
-  list.innerHTML = versions
-    .map(
-      (version) => `
-        <div class="item">
-          <div class="item-head">
-            <div>
-              <p class="item-title">${escapeHtml(version.date)}</p>
-              <div class="meta">
-                <span>${escapeHtml(version.commit.slice(0, 12))}</span>
-                <span>${escapeHtml(version.subject)}</span>
-              </div>
-            </div>
-            <a class="button primary compact" href="/api/jobs/${job.id}/versions/${version.commit}/download">下载 zip</a>
-          </div>
-        </div>
-      `,
-    )
-    .join("");
-}
-
-async function testCurrentConnection() {
-  const payload = connectionPayload();
-  const validation = validateConnectionPayload(payload);
-  if (validation) {
-    setConnectionStatus(validation, "bad");
-    toast(validation);
-    return;
-  }
-  setConnectionStatus("正在连接 SSH...", "");
-  await api("/api/ssh/test", { method: "POST", body: JSON.stringify(payload) });
-  setConnectionStatus("连接成功，可以读取远程目录。", "ok");
-  toast("SSH 连接成功。");
-}
-
-async function browseRemote(useSavedJobId = null) {
-  const list = $("browserList");
-  const path = $("browsePath").value || "/";
-  let entries;
-
-  if (useSavedJobId) {
-    entries = await api(`/api/jobs/${useSavedJobId}/browse?path=${encodeURIComponent(path)}`);
-  } else {
-    const payload = { ...connectionPayload(), path };
-    const validation = validateConnectionPayload(payload);
-    if (validation) {
-      list.className = "browser empty";
-      list.textContent = validation;
-      setConnectionStatus(validation, "bad");
-      return;
-    }
-    entries = await api("/api/ssh/browse", { method: "POST", body: JSON.stringify(payload) });
-    setConnectionStatus("目录读取成功。可以点“加入备份目录”。", "ok");
-  }
-
-  if (!entries.length) {
-    list.className = "browser empty";
-    list.textContent = "这个目录是空的。";
-    return;
-  }
-
-  const parent = parentPath(path);
-  list.className = "browser";
-  list.innerHTML = `
-    ${
-      parent
-        ? `<div class="browser-row">
-            <div>
-              <div class="browser-name">上级目录</div>
-              <div class="meta">${escapeHtml(parent)}</div>
-            </div>
-            <div class="browser-actions">
-              <button class="button secondary compact" data-action="open-dir" data-path="${escapeAttr(parent)}" type="button">打开</button>
-            </div>
-          </div>`
-        : ""
-    }
-    ${entries
-      .map(
-        (entry) => `
-          <div class="browser-row">
-            <div>
-              <div class="browser-name">${entry.is_dir ? "目录" : "文件"} ${escapeHtml(entry.name)}</div>
-              <div class="meta">${escapeHtml(entry.path)} · ${entry.size} bytes</div>
-            </div>
-            <div class="browser-actions">
-              ${
-                entry.is_dir
-                  ? `<button class="button secondary compact" data-action="open-dir" data-path="${escapeAttr(entry.path)}" type="button">打开</button>
-                     <button class="button primary compact" data-action="add-dir" data-path="${escapeAttr(entry.path)}" type="button">加入备份目录</button>`
-                  : ""
-              }
-            </div>
-          </div>
-        `,
-      )
-      .join("")}
-  `;
-}
-
-function parentPath(path) {
-  const clean = (path || "/").replace(/\/+$/, "") || "/";
-  if (clean === "/") return "";
-  const index = clean.lastIndexOf("/");
-  return index <= 0 ? "/" : clean.slice(0, index);
 }
 
 function escapeHtml(value) {
@@ -336,12 +80,160 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function escapeAttr(value) {
-  return escapeHtml(value).replaceAll("`", "&#096;");
+function setPage(page) {
+  state.page = page;
+  $("dashboardPage").classList.toggle("active-page", page === "dashboard");
+  $("versionsPage").classList.toggle("active-page", page === "versions");
+  document.querySelectorAll("[data-page-link]").forEach((link) => {
+    link.classList.toggle("active", link.dataset.pageLink === page);
+  });
+  if (page === "versions") {
+    renderVersionJobSelect();
+    loadSelectedVersions().catch((error) => toast(`加载失败：${error.message}`));
+  }
 }
 
-async function handleSubmit(event) {
-  event.preventDefault();
+function renderJobs() {
+  $("jobCount").textContent = `${state.jobs.length} 个任务`;
+  const list = $("jobsList");
+  if (!state.jobs.length) {
+    list.className = "task-list empty";
+    list.textContent = "还没有任务。点击右上角“新建任务”开始配置。";
+    return;
+  }
+
+  list.className = "task-list";
+  list.innerHTML = state.jobs
+    .map(
+      (job) => `
+        <article class="task-row" data-open-job="${job.id}" tabindex="0">
+          <div class="task-main">
+            <p class="task-title">
+              <span class="status-dot ${job.enabled ? "" : "off"}"></span>
+              ${escapeHtml(job.name)}
+            </p>
+            <div class="meta">
+              <span>${escapeHtml(job.username)}@${escapeHtml(job.host)}:${job.port}</span>
+              <span>${formatSchedule(job)}</span>
+              <span>${job.enabled ? "已启用" : "已暂停"}</span>
+            </div>
+            <div class="meta">
+              <span>目录：${escapeHtml(job.include_paths.join(", "))}</span>
+              <span>目标：${escapeHtml(job.target_path)}</span>
+            </div>
+          </div>
+          <div class="task-actions">
+            <button class="button secondary compact" data-action="test" data-id="${job.id}" type="button">测试</button>
+            <button class="button primary compact" data-action="run" data-id="${job.id}" type="button">立即备份</button>
+          </div>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function renderRuns(targetId = "runsList", runs = state.runs) {
+  const list = $(targetId);
+  if (!runs.length) {
+    list.className = "timeline empty";
+    list.textContent = "暂无运行记录。";
+    return;
+  }
+  list.className = "timeline";
+  list.innerHTML = runs
+    .map(
+      (run) => `
+        <div class="run-row">
+          <strong>${escapeHtml(run.status)} · ${escapeHtml(jobName(run.job_id))}</strong>
+          <p>${escapeHtml(run.started_at || "")}${run.finished_at ? ` 至 ${escapeHtml(run.finished_at)}` : ""}</p>
+          <p>${escapeHtml(run.message || "无消息")}</p>
+          <p>${escapeHtml(run.commit_hash ? `提交 ${run.commit_hash.slice(0, 12)}` : "无提交")}</p>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function renderVersionJobSelect() {
+  const select = $("versionsJobSelect");
+  if (!state.jobs.length) {
+    select.innerHTML = `<option value="">暂无任务</option>`;
+    return;
+  }
+  if (!state.selectedJobId) {
+    state.selectedJobId = state.jobs[0].id;
+  }
+  select.innerHTML = state.jobs
+    .map((job) => `<option value="${job.id}" ${job.id === state.selectedJobId ? "selected" : ""}>${escapeHtml(job.name)}</option>`)
+    .join("");
+}
+
+function renderVersions(versions) {
+  const list = $("versionsList");
+  if (!versions.length) {
+    list.className = "version-list empty";
+    list.textContent = "这个任务还没有备份版本。运行一次备份后会显示在这里。";
+    return;
+  }
+  list.className = "version-list";
+  list.innerHTML = versions
+    .map(
+      (version) => `
+        <div class="version-row">
+          <div>
+            <strong>${escapeHtml(version.date)}</strong>
+            <p>${escapeHtml(version.subject)} · ${escapeHtml(version.commit.slice(0, 12))}</p>
+          </div>
+          <a class="button primary compact" href="/api/jobs/${state.selectedJobId}/versions/${version.commit}/download">下载 zip</a>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function resetDialog() {
+  $("jobForm").reset();
+  $("jobId").value = "";
+  $("dialogTitle").textContent = "新建任务";
+  $("deleteFromDialogBtn").hidden = true;
+  $("password").required = true;
+  $("targetPath").value = defaults.targetPath;
+  $("includePaths").value = defaults.includePath;
+  $("port").value = 22;
+  $("username").value = "root";
+  $("timeOfDay").value = "03:00";
+  $("enabled").checked = true;
+  setConnectionStatus("保存前可先测试 SSH 连接。");
+}
+
+function openJobDialog(job = null) {
+  resetDialog();
+  if (job) {
+    $("jobId").value = job.id;
+    $("dialogTitle").textContent = `编辑：${job.name}`;
+    $("deleteFromDialogBtn").hidden = false;
+    $("password").required = false;
+    $("name").value = job.name;
+    $("host").value = job.host;
+    $("port").value = job.port;
+    $("username").value = job.username;
+    $("targetPath").value = job.target_path;
+    $("includePaths").value = job.include_paths.join("\n");
+    $("scheduleKind").value = job.schedule_kind;
+    $("dayOfWeek").value = job.day_of_week ?? 0;
+    $("timeOfDay").value = `${String(job.hour).padStart(2, "0")}:${String(job.minute).padStart(2, "0")}`;
+    $("enabled").checked = job.enabled;
+    setConnectionStatus("编辑任务时，密码留空表示不修改旧密码。");
+  }
+  $("jobDialog").showModal();
+  $("name").focus();
+}
+
+function closeJobDialog() {
+  $("jobDialog").close();
+}
+
+function formPayload() {
   const [hour, minute] = $("timeOfDay").value.split(":").map(Number);
   const payload = {
     name: $("name").value.trim(),
@@ -350,7 +242,7 @@ async function handleSubmit(event) {
     username: $("username").value.trim(),
     target_path: $("targetPath").value.trim(),
     include_paths: lines($("includePaths").value),
-    exclude_patterns: lines($("excludePatterns").value),
+    exclude_patterns: defaults.excludePatterns,
     schedule_kind: $("scheduleKind").value,
     day_of_week: Number($("dayOfWeek").value),
     hour,
@@ -360,124 +252,188 @@ async function handleSubmit(event) {
   if ($("password").value) {
     payload.password = $("password").value;
   }
+  return payload;
+}
 
+function validatePayload(payload, isNew) {
+  if (!payload.name) return "请填写任务名称。";
+  if (!payload.host) return "请填写 SSH 地址。";
+  if (!payload.username) return "请填写用户名。";
+  if (!payload.target_path) return "请填写备份目标目录。";
+  if (!payload.include_paths.length) return "请至少填写一个备份目录。";
+  if (isNew && !$("password").value) return "新任务必须填写 SSH 密码。";
+  return "";
+}
+
+async function loadJobs() {
+  state.jobs = await api("/api/jobs");
+  if (!state.selectedJobId && state.jobs[0]) {
+    state.selectedJobId = state.jobs[0].id;
+  }
+  renderJobs();
+  renderVersionJobSelect();
+}
+
+async function loadRuns() {
+  state.runs = await api("/api/runs");
+  renderRuns();
+}
+
+async function loadSelectedVersions() {
+  const job = activeJob();
+  if (!job) {
+    $("versionsList").className = "version-list empty";
+    $("versionsList").textContent = "暂无任务。";
+    $("versionRunsList").className = "timeline empty";
+    $("versionRunsList").textContent = "暂无任务。";
+    return;
+  }
+  const [versions, runs] = await Promise.all([
+    api(`/api/jobs/${job.id}/versions`),
+    api(`/api/runs?job_id=${job.id}`),
+  ]);
+  renderVersions(versions);
+  renderRuns("versionRunsList", runs);
+}
+
+async function saveJob(event) {
+  event.preventDefault();
   const jobId = $("jobId").value;
-  if (!jobId && !payload.password) {
-    toast("新任务必须填写 SSH 密码。");
+  const payload = formPayload();
+  const validation = validatePayload(payload, !jobId);
+  if (validation) {
+    toast(validation);
     return;
   }
-  if (!payload.include_paths.length) {
-    toast("请至少选择或填写一个备份目录。");
-    return;
-  }
-
   try {
     const saved = jobId
       ? await api(`/api/jobs/${jobId}`, { method: "PATCH", body: JSON.stringify(payload) })
       : await api("/api/jobs", { method: "POST", body: JSON.stringify(payload) });
     state.selectedJobId = saved.id;
-    await loadJobs();
-    resetForm();
+    await Promise.all([loadJobs(), loadRuns()]);
+    closeJobDialog();
     toast("任务已保存。");
   } catch (error) {
     toast(`保存失败：${error.message}`);
   }
 }
 
-async function handleJobAction(event) {
-  const button = event.target.closest("button[data-action]");
-  if (!button) return;
-  const action = button.dataset.action;
-  const id = Number(button.dataset.id);
-  const job = state.jobs.find((item) => item.id === id);
-  if (!job) return;
-
+async function testDialogConnection() {
+  const payload = formPayload();
+  if (!payload.host || !payload.username) {
+    setConnectionStatus("请先填写 SSH 地址和用户名。", "bad");
+    return;
+  }
+  if (!$("password").value) {
+    setConnectionStatus("测试连接需要填写密码。", "bad");
+    return;
+  }
+  setConnectionStatus("正在连接 SSH...");
   try {
-    if (action === "select") {
-      state.selectedJobId = id;
-      renderJobs();
-      toast(`已选择：${job.name}`);
-    }
-    if (action === "edit") {
-      state.selectedJobId = id;
-      fillForm(job);
-      renderJobs();
-    }
-    if (action === "test") {
-      button.disabled = true;
-      await api(`/api/jobs/${id}/test`, { method: "POST" });
-      toast("SSH 连接成功。");
-    }
-    if (action === "browse-saved") {
-      state.selectedJobId = id;
-      $("browsePath").value = job.include_paths[0] || defaults.includePath;
-      await browseRemote(id);
-      renderJobs();
-    }
-    if (action === "run") {
-      button.disabled = true;
-      toast("备份已加入后台队列。");
-      await api(`/api/jobs/${id}/run`, { method: "POST" });
-      setTimeout(() => {
-        Promise.all([loadRuns(), loadVersions()]).catch((error) => toast(`刷新失败：${error.message}`));
-      }, 1800);
-    }
-    if (action === "delete") {
-      const yes = window.confirm(`确定删除任务“${job.name}”吗？本操作不删除备份仓库文件。`);
-      if (!yes) return;
-      await api(`/api/jobs/${id}`, { method: "DELETE" });
-      if (state.selectedJobId === id) state.selectedJobId = null;
-      await loadJobs();
-      toast("任务已删除。");
-    }
+    await api("/api/ssh/test", {
+      method: "POST",
+      body: JSON.stringify({
+        host: payload.host,
+        port: payload.port,
+        username: payload.username,
+        password: $("password").value,
+      }),
+    });
+    setConnectionStatus("SSH 连接成功。", "ok");
   } catch (error) {
-    toast(`操作失败：${error.message}`);
-  } finally {
-    button.disabled = false;
+    setConnectionStatus(error.message, "bad");
   }
 }
 
+async function deleteCurrentJob() {
+  const jobId = Number($("jobId").value);
+  const job = state.jobs.find((item) => item.id === jobId);
+  if (!job) return;
+  const yes = window.confirm(`确定删除任务“${job.name}”吗？本操作不删除备份仓库文件。`);
+  if (!yes) return;
+  await api(`/api/jobs/${jobId}`, { method: "DELETE" });
+  if (state.selectedJobId === jobId) state.selectedJobId = state.jobs.find((item) => item.id !== jobId)?.id || null;
+  await Promise.all([loadJobs(), loadRuns()]);
+  closeJobDialog();
+  toast("任务已删除。");
+}
+
+async function runJob(jobId) {
+  toast("备份已加入后台队列。");
+  await api(`/api/jobs/${jobId}/run`, { method: "POST" });
+  setTimeout(() => {
+    Promise.all([loadRuns(), state.page === "versions" ? loadSelectedVersions() : Promise.resolve()]).catch((error) =>
+      toast(`刷新失败：${error.message}`),
+    );
+  }, 1800);
+}
+
+async function testSavedJob(jobId) {
+  await api(`/api/jobs/${jobId}/test`, { method: "POST" });
+  toast("SSH 连接成功。");
+}
+
 function bindEvents() {
-  $("jobForm").addEventListener("submit", handleSubmit);
-  $("resetFormBtn").addEventListener("click", resetForm);
-  $("testDraftBtn").addEventListener("click", () => testCurrentConnection().catch((error) => {
-    setConnectionStatus(error.message, "bad");
-    toast(`连接失败：${error.message}`);
-  }));
+  document.querySelectorAll("[data-page-link]").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      const page = link.dataset.pageLink;
+      history.replaceState(null, "", `#${page}`);
+      setPage(page);
+    });
+  });
+
+  $("newJobBtn").addEventListener("click", () => openJobDialog());
   $("refreshBtn").addEventListener("click", async () => {
     await Promise.all([loadJobs(), loadRuns()]);
     toast("已刷新。");
   });
-  $("jobsList").addEventListener("click", handleJobAction);
-  $("browseBtn").addEventListener("click", () => browseRemote().catch((error) => {
-    setConnectionStatus(error.message, "bad");
-    toast(`读取失败：${error.message}`);
-  }));
-  $("browserList").addEventListener("click", (event) => {
-    const openButton = event.target.closest("button[data-action='open-dir']");
-    const addButton = event.target.closest("button[data-action='add-dir']");
-    if (openButton) {
-      $("browsePath").value = openButton.dataset.path;
-      browseRemote(state.selectedJobId && !$("password").value ? state.selectedJobId : null).catch((error) =>
-        toast(`读取失败：${error.message}`),
-      );
+  $("refreshVersionsBtn").addEventListener("click", () => loadSelectedVersions().catch((error) => toast(`刷新失败：${error.message}`)));
+  $("versionsJobSelect").addEventListener("change", (event) => {
+    state.selectedJobId = Number(event.target.value);
+    loadSelectedVersions().catch((error) => toast(`加载失败：${error.message}`));
+  });
+
+  $("jobsList").addEventListener("click", (event) => {
+    const actionButton = event.target.closest("button[data-action]");
+    const row = event.target.closest("[data-open-job]");
+    if (actionButton) {
+      event.stopPropagation();
+      const id = Number(actionButton.dataset.id);
+      if (actionButton.dataset.action === "run") runJob(id).catch((error) => toast(`操作失败：${error.message}`));
+      if (actionButton.dataset.action === "test") testSavedJob(id).catch((error) => toast(`测试失败：${error.message}`));
+      return;
     }
-    if (addButton) {
-      $("includePaths").value = uniqueLines($("includePaths").value, addButton.dataset.path);
-      toast("已加入备份目录。");
+    if (row) {
+      const job = state.jobs.find((item) => item.id === Number(row.dataset.openJob));
+      if (job) openJobDialog(job);
     }
   });
-  $("loadVersionsBtn").addEventListener("click", () => loadVersions().catch((error) => toast(`加载失败：${error.message}`)));
+
+  $("jobsList").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest("[data-open-job]");
+    if (!row) return;
+    event.preventDefault();
+    const job = state.jobs.find((item) => item.id === Number(row.dataset.openJob));
+    if (job) openJobDialog(job);
+  });
+
+  $("jobForm").addEventListener("submit", saveJob);
+  $("testConnectionBtn").addEventListener("click", testDialogConnection);
+  $("deleteFromDialogBtn").addEventListener("click", () => deleteCurrentJob().catch((error) => toast(`删除失败：${error.message}`)));
+  $("closeDialogBtn").addEventListener("click", closeJobDialog);
+  $("cancelDialogBtn").addEventListener("click", closeJobDialog);
+  $("jobDialog").addEventListener("click", (event) => {
+    if (event.target === $("jobDialog")) closeJobDialog();
+  });
 }
 
 async function init() {
-  setDefaults();
   bindEvents();
-  try {
-    await Promise.all([loadJobs(), loadRuns()]);
-  } catch (error) {
-    toast(`初始化失败：${error.message}`);
-  }
+  await Promise.all([loadJobs(), loadRuns()]);
+  const hashPage = location.hash.replace("#", "");
+  setPage(hashPage === "versions" ? "versions" : "dashboard");
 }
 
-init();
+init().catch((error) => toast(`初始化失败：${error.message}`));

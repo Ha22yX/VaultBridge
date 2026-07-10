@@ -3,15 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta
-      name="description"
-      content="VaultBridge 是一个把服务器网站文件备份到 NAS，并用 Git 保留历史版本的控制面板。"
-    />
+    <meta name="description" content="VaultBridge 是一个把服务器网站文件备份到 NAS，并用 Git 保留历史版本的控制面板。" />
     <title>VaultBridge</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <a class="skip-link" href="#jobs">跳到主要内容</a>
+    <a class="skip-link" href="#main">跳到主要内容</a>
 
     <div class="shell">
       <aside class="sidebar">
@@ -24,211 +21,193 @@
         </div>
 
         <nav class="nav" aria-label="主导航">
-          <a class="active" href="#jobs">任务</a>
-          <a href="#settings">配置</a>
-          <a href="#history">版本</a>
+          <a class="active" href="#dashboard" data-page-link="dashboard">任务概览</a>
+          <a href="#versions" data-page-link="versions">版本记录</a>
         </nav>
 
         <div class="side-note">
-          <span>源服务器只读</span>
-          <p>通过 SSH/SFTP 拉取文件。不会在服务器端写入、移动或删除文件。</p>
+          <span>简化流程</span>
+          <p>首页只看任务和状态。点击任务即可编辑配置，历史版本集中到版本页面查看。</p>
         </div>
       </aside>
 
-      <main>
+      <main id="main">
         <div class="workspace">
-          <header class="topbar">
-            <div>
-              <p class="eyebrow">Backup console</p>
-              <h1>服务器文件备份到 NAS</h1>
-              <p class="subtitle">选择网站目录，设置频率，VaultBridge 会把每次快照提交到 Git 历史。</p>
-            </div>
-            <button id="refreshBtn" class="button secondary" type="button">刷新状态</button>
-          </header>
-
-          <section class="summary-grid" aria-label="备份状态概览">
-            <div class="summary-card">
-              <span>默认源目录</span>
-              <strong>/www/wwwroot</strong>
-            </div>
-            <div class="summary-card">
-              <span>版本方式</span>
-              <strong>Git commit</strong>
-            </div>
-            <div class="summary-card">
-              <span>导出方式</span>
-              <strong>ZIP 下载</strong>
-            </div>
-          </section>
-
-          <section class="layout">
-            <article class="panel setup-panel" id="settings">
-              <div class="panel-header">
-                <div>
-                  <p class="eyebrow">配置</p>
-                  <h2>备份任务</h2>
-                </div>
-                <span id="formMode" class="badge">新任务</span>
+          <section id="dashboardPage" class="page active-page">
+            <header class="topbar">
+              <div>
+                <p class="eyebrow">Backup console</p>
+                <h1>备份任务</h1>
+                <p class="subtitle">管理服务器到 NAS 的自动备份任务。点击任务行可编辑配置。</p>
               </div>
+              <div class="top-actions">
+                <button id="refreshBtn" class="button secondary" type="button">刷新</button>
+                <button id="newJobBtn" class="button primary" type="button">新建任务</button>
+              </div>
+            </header>
 
-              <form id="jobForm" class="form">
-                <input id="jobId" type="hidden" />
-
-                <div class="form-section">
-                  <p class="section-label">基础信息</p>
-                  <label>
-                    任务名称
-                    <input id="name" required placeholder="例如：宝塔网站文件" />
-                  </label>
-                  <label>
-                    备份目标目录
-                    <input id="targetPath" required placeholder="/storage/Files/服务器备份/147.189.128.208" />
-                  </label>
-                </div>
-
-                <div class="form-section">
-                  <p class="section-label">SSH 连接</p>
-                  <div class="field three">
-                    <label>
-                      地址
-                      <input id="host" required placeholder="服务器 IP 或域名" />
-                    </label>
-                    <label>
-                      端口
-                      <input id="port" required type="number" min="1" max="65535" value="22" />
-                    </label>
-                    <label>
-                      用户名
-                      <input id="username" required placeholder="root" />
-                    </label>
-                  </div>
-                  <label>
-                    密码
-                    <input
-                      id="password"
-                      required
-                      type="password"
-                      autocomplete="new-password"
-                      placeholder="只保存在本机加密数据库中"
-                    />
-                  </label>
-                  <div class="inline-tools">
-                    <button id="testDraftBtn" class="button secondary" type="button">测试当前连接</button>
-                    <span id="connectionStatus" class="status-text">先测试连接，再选择目录。</span>
-                  </div>
-                </div>
-
-                <div class="form-section">
-                  <p class="section-label">备份范围</p>
-                  <label>
-                    需要备份的目录
-                    <textarea id="includePaths" rows="3" placeholder="/www/wwwroot"></textarea>
-                    <small>一行一个目录。推荐先备份 `/www/wwwroot`。</small>
-                  </label>
-
-                  <details>
-                    <summary>高级排除规则</summary>
-                    <label>
-                      不备份这些文件或文件夹
-                      <textarea id="excludePatterns" rows="4"></textarea>
-                    </label>
-                  </details>
-                </div>
-
-                <div class="form-section">
-                  <p class="section-label">计划</p>
-                  <div class="schedule">
-                    <label>
-                      频率
-                      <select id="scheduleKind">
-                        <option value="daily">每天</option>
-                        <option value="weekly">每周</option>
-                      </select>
-                    </label>
-                    <label>
-                      星期
-                      <select id="dayOfWeek">
-                        <option value="0">周一</option>
-                        <option value="1">周二</option>
-                        <option value="2">周三</option>
-                        <option value="3">周四</option>
-                        <option value="4">周五</option>
-                        <option value="5">周六</option>
-                        <option value="6">周日</option>
-                      </select>
-                    </label>
-                    <label>
-                      时间
-                      <input id="timeOfDay" type="time" value="03:00" />
-                    </label>
-                    <label class="switch-row">
-                      <input id="enabled" type="checkbox" checked />
-                      启用
-                    </label>
-                  </div>
-                </div>
-
-                <div class="actions">
-                  <button class="button primary" type="submit">保存任务</button>
-                  <button id="resetFormBtn" class="button secondary" type="button">清空</button>
-                </div>
-              </form>
-            </article>
-
-            <section class="main-stack">
-              <article class="panel" id="jobs">
+            <section class="dashboard-grid">
+              <article class="panel task-panel">
                 <div class="panel-header">
                   <div>
-                    <p class="eyebrow">任务</p>
+                    <p class="eyebrow">Tasks</p>
                     <h2>任务列表</h2>
                   </div>
                   <span id="jobCount" class="badge">0 个任务</span>
                 </div>
-                <div id="jobsList" class="list empty">还没有任务。先保存左侧配置。</div>
+                <div id="jobsList" class="task-list empty">还没有任务。点击右上角“新建任务”开始配置。</div>
+              </article>
+
+              <article class="panel runs-panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">Runs</p>
+                    <h2>最近运行</h2>
+                  </div>
+                  <span class="badge">50 条</span>
+                </div>
+                <div id="runsList" class="timeline empty">暂无运行记录。</div>
+              </article>
+            </section>
+          </section>
+
+          <section id="versionsPage" class="page">
+            <header class="topbar">
+              <div>
+                <p class="eyebrow">Versions</p>
+                <h1>版本记录</h1>
+                <p class="subtitle">选择一个备份任务，查看 Git 历史版本和该任务的运行记录。</p>
+              </div>
+              <button id="refreshVersionsBtn" class="button secondary" type="button">刷新版本</button>
+            </header>
+
+            <section class="version-toolbar">
+              <label>
+                备份任务
+                <select id="versionsJobSelect"></select>
+              </label>
+            </section>
+
+            <section class="version-grid">
+              <article class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="eyebrow">Commits</p>
+                    <h2>备份版本</h2>
+                  </div>
+                </div>
+                <div id="versionsList" class="version-list empty">选择任务后查看版本。</div>
               </article>
 
               <article class="panel">
                 <div class="panel-header">
                   <div>
-                    <p class="eyebrow">浏览</p>
-                    <h2>远程目录</h2>
+                    <p class="eyebrow">History</p>
+                    <h2>历史记录</h2>
                   </div>
-                  <button id="browseBtn" class="button secondary compact" type="button">用当前连接读取</button>
                 </div>
-                <div class="browse-bar">
-                  <input id="browsePath" value="/www/wwwroot" />
-                </div>
-                <div id="browserList" class="browser empty">填写 SSH 信息后，可以直接读取目录，不需要先保存任务。</div>
+                <div id="versionRunsList" class="timeline empty">选择任务后查看运行记录。</div>
               </article>
-
-              <div class="split-panels">
-                <article class="panel" id="history">
-                  <div class="panel-header">
-                    <div>
-                      <p class="eyebrow">版本</p>
-                      <h2>历史下载</h2>
-                    </div>
-                    <button id="loadVersionsBtn" class="button secondary compact" type="button">加载</button>
-                  </div>
-                  <div id="versionsList" class="list empty">运行一次备份后，这里会出现 Git 历史版本。</div>
-                </article>
-
-                <article class="panel">
-                  <div class="panel-header">
-                    <div>
-                      <p class="eyebrow">记录</p>
-                      <h2>最近运行</h2>
-                    </div>
-                    <span class="badge">50 条</span>
-                  </div>
-                  <div id="runsList" class="list empty">暂无运行记录。</div>
-                </article>
-              </div>
             </section>
           </section>
         </div>
       </main>
     </div>
+
+    <dialog id="jobDialog" class="job-dialog">
+      <form id="jobForm" class="dialog-card">
+        <input id="jobId" type="hidden" />
+
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">Backup task</p>
+            <h2 id="dialogTitle">新建任务</h2>
+          </div>
+          <button id="closeDialogBtn" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+
+        <div class="form-grid">
+          <label class="span-2">
+            任务名称
+            <input id="name" required placeholder="例如：宝塔网站文件" />
+          </label>
+
+          <label class="span-2">
+            备份目标目录
+            <input id="targetPath" required placeholder="/storage/Files/服务器备份/147.189.128.208" />
+          </label>
+
+          <label>
+            SSH 地址
+            <input id="host" required placeholder="147.189.128.208" />
+          </label>
+
+          <label>
+            端口
+            <input id="port" required type="number" min="1" max="65535" value="22" />
+          </label>
+
+          <label>
+            用户名
+            <input id="username" required placeholder="root" />
+          </label>
+
+          <label>
+            SSH 密码
+            <input id="password" type="password" autocomplete="new-password" placeholder="编辑时留空则不修改旧密码" />
+          </label>
+
+          <label class="span-2">
+            备份目录
+            <textarea id="includePaths" rows="3" placeholder="/www/wwwroot"></textarea>
+            <small>一行一个目录。默认建议 `/www/wwwroot`。</small>
+          </label>
+
+          <label>
+            频率
+            <select id="scheduleKind">
+              <option value="daily">每天</option>
+              <option value="weekly">每周</option>
+            </select>
+          </label>
+
+          <label>
+            星期
+            <select id="dayOfWeek">
+              <option value="0">周一</option>
+              <option value="1">周二</option>
+              <option value="2">周三</option>
+              <option value="3">周四</option>
+              <option value="4">周五</option>
+              <option value="5">周六</option>
+              <option value="6">周日</option>
+            </select>
+          </label>
+
+          <label>
+            时间
+            <input id="timeOfDay" type="time" value="03:00" />
+          </label>
+
+          <label class="switch-row">
+            <input id="enabled" type="checkbox" checked />
+            启用计划
+          </label>
+        </div>
+
+        <div class="dialog-status">
+          <span id="connectionStatus" class="status-text">保存前可先测试 SSH 连接。</span>
+        </div>
+
+        <div class="dialog-actions">
+          <button id="testConnectionBtn" class="button secondary" type="button">测试连接</button>
+          <button id="deleteFromDialogBtn" class="button danger" type="button">删除任务</button>
+          <span class="dialog-spacer"></span>
+          <button id="cancelDialogBtn" class="button secondary" type="button">取消</button>
+          <button class="button primary" type="submit">保存任务</button>
+        </div>
+      </form>
+    </dialog>
 
     <div id="toast" class="toast" hidden></div>
     <script src="/static/app.js"></script>
