@@ -15,6 +15,14 @@ if ! command -v git >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v rsync >/dev/null 2>&1; then
+  echo "warning: rsync is not installed. VaultBridge will fall back to slower tar streaming."
+fi
+
+if ! command -v sshpass >/dev/null 2>&1; then
+  echo "warning: sshpass is not installed. Password-based rsync cannot run unless SSH key login is configured."
+fi
+
 mkdir -p "$APP_DIR" "$DATA_DIR"
 python3 -m venv "$APP_DIR/.venv"
 "$APP_DIR/.venv/bin/pip" install --upgrade pip
@@ -51,4 +59,3 @@ systemctl daemon-reload
 systemctl enable --now vaultbridge
 
 echo "VaultBridge is running on port $PORT"
-

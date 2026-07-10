@@ -135,6 +135,7 @@ function phaseLabel(phase) {
     preparing: "准备本地仓库",
     connecting: "连接服务器",
     estimating: "统计远程文件",
+    rsyncing: "增量同步",
     scanning: "扫描文件",
     syncing: "同步文件",
     committing: "写入 Git 版本",
@@ -165,6 +166,11 @@ function progressForRun(run) {
   if (run.status === "failed") return { percent: 100, text: "备份失败", failed: true };
   if (run.status === "stopped") return { percent: Math.max(1, total ? Math.round((copied / total) * 100) : 0), text: "任务已结束，可继续恢复", failed: true };
   if (run.status === "paused") return { percent: Math.max(1, total ? Math.round((copied / total) * 100) : 10), text: "任务已暂停", failed: false };
+  if (phase === "rsyncing" && total > 0) {
+    const percent = Math.max(8, Math.min(94, Math.round((copied / total) * 100)));
+    return { percent, text: `正在增量同步：已检查 ${copied}/${total} 项 · 已传输 ${formatBytes(copiedBytes)}`, failed: false };
+  }
+  if (phase === "rsyncing") return { percent: 12, text: `正在增量同步：已传输 ${formatBytes(copiedBytes)}`, failed: false };
   if (phase === "estimating") return { percent: 10, text: "正在服务器端快速统计文件数量", failed: false };
   if (phase === "scanning") return { percent: 12, text: `正在扫描文件：已发现 ${total} 个`, failed: false };
   if (phase === "syncing" && total > 0) {

@@ -1,11 +1,12 @@
 # VaultBridge
 
-VaultBridge is a Python web panel for backing up website files from a remote Linux server to a NAS folder. The source server is read only: VaultBridge connects over SSH, streams selected folders through remote `tar`, and commits the local copy into a Git repository on the backup disk. If the remote server cannot run `tar`, it falls back to SFTP.
+VaultBridge is a Python web panel for backing up website files from a remote Linux server to a NAS folder. The source server is read only: VaultBridge prefers `rsync` over SSH for incremental transfer, then commits the local copy into a Git repository on the backup disk. If local `rsync` is not available, it falls back to remote `tar` streaming, then SFTP.
 
 ## What it does
 
 - Configure one or more remote folders to back up.
 - Schedule daily or weekly backups from the web panel.
+- Transfer with `rsync` when available, so unchanged files are not sent again.
 - Store backups in a local Git repository, so unchanged files are not duplicated every day.
 - View historical commits and download any version as a zip file.
 - Show run details with file count, received files, bytes, current path, and task status.
@@ -35,6 +36,8 @@ Put the generated value in `.env` as `BACKUP_SECRET_KEY`, then:
 ```bash
 docker compose up -d --build
 ```
+
+The Docker image installs `rsync`, `sshpass`, `openssh-client`, and `git`, so password-based rsync works without extra manual setup. For a non-Docker Linux/NAS install, install those packages yourself if you want the fastest incremental transfer path.
 
 The compose file maps:
 

@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git openssh-client \
+  && apt-get install -y --no-install-recommends git openssh-client rsync sshpass \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -15,4 +15,3 @@ ENV VAULTBRIDGE_DATA_DIR=/app/data
 
 EXPOSE 8728
 CMD ["python", "-m", "app.main"]
-

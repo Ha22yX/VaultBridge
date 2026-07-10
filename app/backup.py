@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import subprocess
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from . import repository
+from .rsync_client import RsyncFailed, RsyncProgress, RsyncUnavailable, has_rsync, run_rsync_tree
 from .ssh_client import (
     RemoteTarError,
     connect_sftp,
@@ -217,6 +219,14 @@ def cleanup_stale_files(root: Path, seen_paths: set[Path]) -> None:
             path.unlink(missing_ok=True)
 
 
+def cleanup_rsync_partials(root: Path) -> None:
+    if not root.exists():
+        return
+    for partial in root.rglob(".rsync-partial"):
+        if partial.is_dir():
+            shutil.rmtree(partial, ignore_errors=True)
+
+
 def _run_sftp_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress, run_id: int) -> tuple[int, int]:
     files = 0
     bytes_written = 0
@@ -259,6 +269,75 @@ def _run_sftp_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress,
     finally:
         sftp.close()
         ssh.close()
+    return files, bytes_written
+
+
+def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress, run_id: int) -> tuple[int, int]:
+    if not has_rsync():
+        raise RsyncUnavailable("Local rsync is not installed.")
+
+    files = 0
+    bytes_written = 0
+    repository.update_run_progress(
+        run_id,
+        phase="rsyncing",
+        message="Starting rsync incremental sync. Only changed files will be transferred.",
+        total_files=0,
+        copied_files=0,
+        total_bytes=0,
+        copied_bytes=0,
+    )
+
+    def handle_rsync(event: RsyncProgress) -> None:
+        progress.current_path = event.current_path or progress.current_path
+        if event.total_files:
+            progress.total_files = event.total_files
+        if event.checked_files:
+            progress.copied_files = event.checked_files
+        if event.transferred_bytes:
+            progress.copied_bytes = event.transferred_bytes
+        if event.total_files:
+            message = (
+                f"rsync incremental sync: checked {event.checked_files}/{event.total_files} items, "
+                f"transferred {event.transferred_files} changed files."
+            )
+        else:
+            message = f"rsync incremental sync: {event.current_path}"
+        progress.update(
+            phase="rsyncing",
+            message=message,
+            current_path=progress.current_path,
+            total_files=progress.total_files,
+            copied_files=progress.copied_files,
+            copied_bytes=progress.copied_bytes,
+        )
+
+    for remote in job["include_paths"]:
+        progress.check_control()
+        destination = snapshot / remote_to_snapshot_path(remote)
+        current_files, current_bytes = run_rsync_tree(
+            host=job["host"],
+            port=job["port"],
+            username=job["username"],
+            password=job["password"],
+            remote_path=remote,
+            destination=destination,
+            exclude_patterns=job["exclude_patterns"],
+            progress_callback=handle_rsync,
+            control_callback=progress.check_control,
+        )
+        cleanup_rsync_partials(destination)
+        files += current_files
+        bytes_written += current_bytes
+    progress.update(
+        force=True,
+        phase="rsyncing",
+        message=f"rsync incremental sync complete. Checked {files} items.",
+        current_path=progress.current_path,
+        total_files=progress.total_files,
+        copied_files=progress.copied_files,
+        copied_bytes=progress.copied_bytes,
+    )
     return files, bytes_written
 
 
@@ -334,7 +413,20 @@ def run_backup(job_id: int) -> dict[str, str | int]:
 
         repository.update_run_progress(run_id, phase="connecting", message="Connecting to SSH server")
         try:
-            files, bytes_written = _run_tar_backup(job, snapshot, progress, run_id)
+            try:
+                files, bytes_written = _run_rsync_backup(job, snapshot, progress, run_id)
+            except (RsyncUnavailable, RsyncFailed) as exc:
+                repository.update_run_progress(
+                    run_id,
+                    phase="estimating",
+                    message=f"rsync unavailable, falling back to tar stream. {exc}",
+                    total_files=0,
+                    copied_files=0,
+                    total_bytes=0,
+                    copied_bytes=0,
+                )
+                progress = RunProgress(run_id)
+                files, bytes_written = _run_tar_backup(job, snapshot, progress, run_id)
         except RemoteTarError as exc:
             repository.update_run_progress(
                 run_id,
