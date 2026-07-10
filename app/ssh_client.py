@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fnmatch
 import posixpath
+import socket
 import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -19,21 +20,66 @@ class RemoteEntry:
     mtime: int
 
 
+class SSHConnectionError(RuntimeError):
+    pass
+
+
+def parse_host_port(host: str, port: int) -> tuple[str, int]:
+    cleaned = host.strip()
+    if cleaned.startswith("ssh://"):
+        cleaned = cleaned.removeprefix("ssh://")
+    if "@" in cleaned:
+        cleaned = cleaned.rsplit("@", 1)[1]
+    if cleaned.startswith("[") and "]:" in cleaned:
+        host_part, port_part = cleaned.rsplit("]:", 1)
+        return host_part.removeprefix("["), int(port_part)
+    if cleaned.count(":") == 1:
+        host_part, port_part = cleaned.rsplit(":", 1)
+        if port_part.isdigit():
+            return host_part, int(port_part)
+    return cleaned, port
+
+
+def friendly_ssh_error(exc: Exception, host: str, port: int) -> SSHConnectionError:
+    target = f"{host}:{port}"
+    message = str(exc)
+    if isinstance(exc, paramiko.AuthenticationException):
+        return SSHConnectionError(f"SSH 认证失败：请检查用户名、密码，以及服务器是否允许该用户密码登录。目标：{target}")
+    if isinstance(exc, paramiko.BadHostKeyException):
+        return SSHConnectionError(f"SSH 主机密钥校验失败。目标：{target}")
+    if isinstance(exc, paramiko.NoValidConnectionsError):
+        return SSHConnectionError(f"无法连接到 SSH 端口：请检查 IP、端口、安全组和防火墙。目标：{target}")
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return SSHConnectionError(f"SSH 连接超时：端口可能被防火墙拦截，或服务器响应太慢。目标：{target}")
+    if isinstance(exc, paramiko.SSHException) and "Error reading SSH protocol banner" in message:
+        return SSHConnectionError(
+            f"端口没有返回 SSH 握手信息：请确认填写的是 SSH 端口，不是宝塔面板、网站或其他服务端口。目标：{target}"
+        )
+    if isinstance(exc, paramiko.SSHException):
+        return SSHConnectionError(f"SSH 连接失败：{message}。目标：{target}")
+    return SSHConnectionError(f"连接失败：{message}。目标：{target}")
+
+
 def connect_sftp(host: str, port: int, username: str, password: str) -> tuple[paramiko.SSHClient, paramiko.SFTPClient]:
+    host, port = parse_host_port(host, port)
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(
-        hostname=host,
-        port=port,
-        username=username,
-        password=password,
-        timeout=15,
-        banner_timeout=15,
-        auth_timeout=15,
-        look_for_keys=False,
-        allow_agent=False,
-    )
-    return client, client.open_sftp()
+    try:
+        client.connect(
+            hostname=host,
+            port=port,
+            username=username,
+            password=password,
+            timeout=20,
+            banner_timeout=60,
+            auth_timeout=30,
+            look_for_keys=False,
+            allow_agent=False,
+        )
+        return client, client.open_sftp()
+    except Exception as exc:
+        client.close()
+        raise friendly_ssh_error(exc, host, port) from exc
 
 
 def normalize_remote_path(path: str) -> str:
@@ -123,4 +169,3 @@ def download_tree(
     local_path.parent.mkdir(parents=True, exist_ok=True)
     sftp.get(remote_path, str(local_path))
     return (1, int(attr.st_size or 0))
-
