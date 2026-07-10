@@ -7,6 +7,7 @@ const state = {
   activeRunId: null,
   activeVersion: null,
   activeVersionPath: "",
+  versionTreeRequestId: 0,
   runCache: {},
   syncTimer: null,
   syncBusy: false,
@@ -507,13 +508,30 @@ function renderBreadcrumbs(path) {
   $("versionBreadcrumbs").innerHTML = crumbs.join("");
 }
 
+function treeRowMotion(index) {
+  if (index > 36) return "";
+  return `style="--row-index: ${Math.min(index, 12)}" data-tree-animated="true"`;
+}
+
+function setVersionTreeLoading(nextPath) {
+  const treeNode = $("versionTree");
+  const currentHeight = treeNode.offsetHeight;
+  if (currentHeight > 0) {
+    treeNode.style.setProperty("--tree-lock-height", `${Math.min(currentHeight, Math.round(window.innerHeight * 0.52))}px`);
+  }
+  renderBreadcrumbs(nextPath);
+  treeNode.setAttribute("aria-busy", "true");
+  treeNode.className = "file-browser loading-state is-switching";
+  treeNode.innerHTML = `<span></span><span></span><span></span>`;
+}
+
 function renderVersionTree(tree) {
   state.activeVersionPath = tree.path || "";
   renderBreadcrumbs(state.activeVersionPath);
   const rows = [];
   if (tree.parent !== null && tree.parent !== undefined) {
     rows.push(`
-      <button class="file-row" data-version-path="${escapeHtml(tree.parent)}" type="button">
+      <button class="file-row" ${treeRowMotion(rows.length)} data-version-path="${escapeHtml(tree.parent)}" type="button">
         <span class="file-icon">↩</span>
         <span class="file-name">返回上一级</span>
         <span class="file-size"></span>
@@ -521,30 +539,54 @@ function renderVersionTree(tree) {
     `);
   }
   if (!tree.entries.length) {
-    rows.push(`<div class="file-empty">这个目录是空的。</div>`);
+    rows.push(`<div class="file-empty" ${treeRowMotion(rows.length)}>这个目录是空的。</div>`);
   }
   tree.entries.forEach((entry) => {
     const isDir = entry.type === "dir";
     rows.push(`
-      <button class="file-row ${isDir ? "is-dir" : "is-file"}" ${isDir ? `data-version-path="${escapeHtml(entry.path)}"` : "disabled"} type="button">
+      <button class="file-row ${isDir ? "is-dir" : "is-file"}" ${treeRowMotion(rows.length)} ${isDir ? `data-version-path="${escapeHtml(entry.path)}"` : "disabled"} type="button">
         <span class="file-icon">${isDir ? "▸" : "·"}</span>
         <span class="file-name">${escapeHtml(entry.name)}</span>
         <span class="file-size">${isDir ? "文件夹" : formatBytes(entry.size || 0)}</span>
       </button>
     `);
   });
-  $("versionTree").className = "file-browser";
-  $("versionTree").innerHTML = rows.join("");
+  const treeNode = $("versionTree");
+  treeNode.className = "file-browser is-settled";
+  treeNode.removeAttribute("aria-busy");
+  treeNode.innerHTML = rows.join("");
+  clearTimeout(window.__versionTreeHeightTimer);
+  window.__versionTreeHeightTimer = setTimeout(() => {
+    treeNode.style.removeProperty("--tree-lock-height");
+  }, 360);
 }
 
 async function loadVersionTree(path = "") {
   if (!state.activeVersion) return;
-  $("versionTree").className = "file-browser loading-state";
-  $("versionTree").innerHTML = `<span></span><span></span><span></span>`;
-  const tree = await api(
-    `/api/jobs/${state.selectedJobId}/versions/${state.activeVersion.commit}/tree?path=${encodeURIComponent(path)}`,
-  );
-  renderVersionTree(tree);
+  const treeNode = $("versionTree");
+  if (path === state.activeVersionPath && treeNode.classList.contains("is-settled")) return;
+  const requestId = (state.versionTreeRequestId += 1);
+  const previousPath = state.activeVersionPath;
+  const previousHtml = treeNode.innerHTML;
+  const previousClass = treeNode.className;
+  setVersionTreeLoading(path);
+  try {
+    const tree = await api(
+      `/api/jobs/${state.selectedJobId}/versions/${state.activeVersion.commit}/tree?path=${encodeURIComponent(path)}`,
+    );
+    if (requestId !== state.versionTreeRequestId) return;
+    renderVersionTree(tree);
+  } catch (error) {
+    if (requestId === state.versionTreeRequestId) {
+      state.activeVersionPath = previousPath;
+      renderBreadcrumbs(previousPath);
+      treeNode.className = previousClass || "file-browser is-settled";
+      treeNode.removeAttribute("aria-busy");
+      treeNode.innerHTML = previousHtml;
+      treeNode.style.removeProperty("--tree-lock-height");
+    }
+    throw error;
+  }
 }
 
 async function openVersionDialog(commit) {

@@ -840,13 +840,33 @@ small {
 
 .file-browser {
   display: grid;
+  align-content: start;
   gap: 8px;
+  min-height: var(--tree-lock-height, clamp(220px, 34dvh, 360px));
   max-height: min(52dvh, 520px);
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgba(247, 249, 245, 0.82);
   padding: 10px;
+  transition:
+    background 360ms var(--ease-out),
+    border-color 360ms var(--ease-out),
+    box-shadow 360ms var(--ease-out);
+}
+
+.file-browser.is-switching {
+  overflow: hidden;
+  border-color: rgba(8, 120, 90, 0.18);
+  background:
+    linear-gradient(180deg, rgba(250, 253, 249, 0.96), rgba(239, 247, 242, 0.9));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  animation: folderPanelIn 260ms var(--ease-out) both;
+}
+
+.file-browser.is-settled [data-tree-animated="true"] {
+  animation: fileRowIn 420ms var(--ease-spring) both;
+  animation-delay: calc(var(--row-index, 0) * 22ms);
 }
 
 .file-row {
@@ -903,6 +923,7 @@ small {
 .file-empty {
   color: var(--muted);
   padding: 18px;
+  transform-origin: top center;
 }
 
 .loading-state {
@@ -1017,6 +1038,28 @@ small {
   }
 }
 
+@keyframes folderPanelIn {
+  from {
+    opacity: 0.82;
+    transform: translateY(4px) scale(0.998);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes fileRowIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1108,6 +1151,10 @@ small {
 
   .file-row {
     grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .file-browser {
+    min-height: var(--tree-lock-height, 240px);
   }
 
   .file-size {
