@@ -1,4 +1,6 @@
-from app.rsync_client import parse_rsync_progress
+from pathlib import Path
+
+from app.rsync_client import _remote_target, _rsync_local_path, _windows_to_cygwin_path, parse_rsync_progress
 
 
 def test_parse_rsync_file_line() -> None:
@@ -32,3 +34,22 @@ def test_parse_rsync_incremental_check_line() -> None:
     assert progress is not None
     assert progress.checked_files == 3
     assert progress.total_files == 12
+
+
+def test_remote_target_can_omit_username() -> None:
+    assert _remote_target("root", "example.com", "/www/wwwroot") == "root@example.com:/www/wwwroot/"
+    assert (
+        _remote_target("root", "example.com", "/www/wwwroot", include_username=False)
+        == "example.com:/www/wwwroot/"
+    )
+
+
+def test_windows_to_cygwin_path() -> None:
+    converted = _windows_to_cygwin_path(Path("C:/Users/Administrator/Desktop/backup"))
+
+    assert converted.lower().startswith("/cygdrive/c/")
+    assert converted.endswith("/Users/Administrator/Desktop/backup")
+
+
+def test_rsync_local_path_trailing_slash() -> None:
+    assert _rsync_local_path(Path("C:/backup"), cygwin_paths=True).endswith("/")

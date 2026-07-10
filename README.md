@@ -23,6 +23,14 @@ python -m app.main
 
 Open `http://127.0.0.1:8728`.
 
+For faster backups on Windows, install cwRsync first:
+
+```powershell
+choco install rsync -y
+```
+
+VaultBridge detects the Chocolatey cwRsync package automatically. When password-based SSH is used, it supplies the password through OpenSSH `SSH_ASKPASS` instead of putting the password in the rsync command line.
+
 ## Recommended NAS deployment
 
 Run VaultBridge on the NAS or on a machine where the NAS backup folder is mounted locally.
