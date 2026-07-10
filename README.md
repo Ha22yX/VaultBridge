@@ -54,6 +54,12 @@ VaultBridge is built for small server operators who host websites on a VPS, aaPa
 
 Docker Compose is the recommended path for a NAS or small always-on machine.
 
+The published image is available from GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/ha22yx/vaultbridge:latest
+```
+
 ```bash
 git clone https://github.com/Ha22yX/VaultBridge.git
 cd VaultBridge
@@ -64,7 +70,8 @@ python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().
 Put the generated key into `.env` as `BACKUP_SECRET_KEY`, then set `VAULTBRIDGE_BACKUP_HOST_DIR` to the NAS folder where backups should live.
 
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 Open the panel:
@@ -74,6 +81,8 @@ http://<nas-ip>:8728
 ```
 
 The Docker image includes `rsync`, `sshpass`, `openssh-client`, and `git`.
+
+To build the image locally from source instead of pulling GHCR, run `docker compose up -d --build`.
 
 ## First Backup Job
 

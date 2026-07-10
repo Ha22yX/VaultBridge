@@ -1,5 +1,9 @@
 FROM python:3.12-slim
 
+LABEL org.opencontainers.image.title="VaultBridge" \
+      org.opencontainers.image.description="Self-hosted NAS backup panel with SSH, rsync, and Git-versioned snapshots." \
+      org.opencontainers.image.source="https://github.com/Ha22yX/VaultBridge"
+
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git openssh-client rsync sshpass \
   && rm -rf /var/lib/apt/lists/*

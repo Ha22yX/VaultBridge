@@ -1,7 +1,7 @@
 services:
   vaultbridge:
     build: .
-    image: vaultbridge:latest
+    image: ghcr.io/ha22yx/vaultbridge:latest
     container_name: vaultbridge
     restart: unless-stopped
     user: "${PUID:-0}:${PGID:-0}"
