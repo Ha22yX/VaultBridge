@@ -51,29 +51,6 @@ function lines(value) {
     .filter(Boolean);
 }
 
-function setConnectionStatus(message, kind = "") {
-  const node = $("connectionStatus");
-  node.textContent = message;
-  node.className = `status-text ${kind}`.trim();
-}
-
-function formatSchedule(job) {
-  const time = `${String(job.hour).padStart(2, "0")}:${String(job.minute).padStart(2, "0")}`;
-  if (job.schedule_kind === "weekly") {
-    const days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
-    return `${days[job.day_of_week ?? 0]} ${time}`;
-  }
-  return `每天 ${time}`;
-}
-
-function jobName(jobId) {
-  return state.jobs.find((job) => job.id === jobId)?.name || `任务 #${jobId}`;
-}
-
-function activeJob() {
-  return state.jobs.find((job) => job.id === state.selectedJobId) || state.jobs[0];
-}
-
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -96,10 +73,38 @@ function formatBytes(bytes) {
   return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[index]}`;
 }
 
+function setConnectionStatus(message, kind = "") {
+  const node = $("connectionStatus");
+  node.textContent = message;
+  node.className = `status-text ${kind}`.trim();
+}
+
+function formatSchedule(job) {
+  const time = `${String(job.hour).padStart(2, "0")}:${String(job.minute).padStart(2, "0")}`;
+  if (job.schedule_kind === "weekly") {
+    const days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+    return `${days[job.day_of_week ?? 0]} ${time}`;
+  }
+  return `每天 ${time}`;
+}
+
+function jobName(jobId) {
+  return state.jobs.find((job) => job.id === jobId)?.name || `任务 #${jobId}`;
+}
+
+function jobById(jobId) {
+  return state.jobs.find((job) => job.id === jobId);
+}
+
+function activeJob() {
+  return state.jobs.find((job) => job.id === state.selectedJobId) || state.jobs[0];
+}
+
 function setPage(page) {
   state.page = page;
   $("dashboardPage").classList.toggle("active-page", page === "dashboard");
   $("versionsPage").classList.toggle("active-page", page === "versions");
+  $("recentPage").classList.toggle("active-page", page === "recent");
   document.querySelectorAll("[data-page-link]").forEach((link) => {
     link.classList.toggle("active", link.dataset.pageLink === page);
   });
@@ -107,75 +112,16 @@ function setPage(page) {
     renderVersionJobSelect();
     loadSelectedVersions().catch((error) => toast(`加载失败：${error.message}`));
   }
-}
-
-function renderJobs() {
-  $("jobCount").textContent = `${state.jobs.length} 个任务`;
-  const list = $("jobsList");
-  if (!state.jobs.length) {
-    list.className = "task-list empty";
-    list.textContent = "还没有任务。点击右上角“新建任务”开始配置。";
-    return;
+  if (page === "recent") {
+    loadRuns().catch((error) => toast(`加载失败：${error.message}`));
   }
-
-  list.className = "task-list";
-  list.innerHTML = state.jobs
-    .map(
-      (job) => `
-        <article class="task-row" data-open-job="${job.id}" tabindex="0">
-          <div class="task-main">
-            <p class="task-title">
-              <span class="status-dot ${job.enabled ? "" : "off"}"></span>
-              ${escapeHtml(job.name)}
-            </p>
-            <div class="meta">
-              <span>${escapeHtml(job.username)}@${escapeHtml(job.host)}:${job.port}</span>
-              <span>${formatSchedule(job)}</span>
-              <span>${job.enabled ? "已启用" : "已暂停"}</span>
-            </div>
-            <div class="meta">
-              <span>目录：${escapeHtml(job.include_paths.join(", "))}</span>
-              <span>目标：${escapeHtml(job.target_path)}</span>
-            </div>
-          </div>
-          <div class="task-actions">
-            <button class="button secondary compact" data-action="test" data-id="${job.id}" type="button">测试</button>
-            <button class="button primary compact" data-action="run" data-id="${job.id}" type="button">立即备份</button>
-          </div>
-        </article>
-      `,
-    )
-    .join("");
-}
-
-function renderRuns(targetId = "runsList", runs = state.runs) {
-  const list = $(targetId);
-  if (!runs.length) {
-    list.className = "timeline empty";
-    list.textContent = "暂无运行记录。";
-    return;
-  }
-  list.className = "timeline";
-  runs.forEach((run) => {
-    state.runCache[run.id] = run;
-  });
-  list.innerHTML = runs
-    .map(
-      (run) => `
-        <div class="run-row" data-run-id="${run.id}" tabindex="0">
-          <strong>${escapeHtml(statusLabel(run.status))} · ${escapeHtml(jobName(run.job_id))}</strong>
-          <p>${escapeHtml(run.started_at || "")}${run.finished_at ? ` 至 ${escapeHtml(run.finished_at)}` : ""}</p>
-          <p>${escapeHtml(run.message || "无消息")}</p>
-          <p>${escapeHtml(run.commit_hash ? `提交 ${run.commit_hash.slice(0, 12)}` : progressSummary(run))}</p>
-        </div>
-      `,
-    )
-    .join("");
 }
 
 function statusLabel(status) {
   const labels = {
     running: "运行中",
+    paused: "已暂停",
+    stopped: "已结束",
     success: "已完成",
     failed: "失败",
     queued: "排队中",
@@ -191,6 +137,8 @@ function phaseLabel(phase) {
     scanning: "扫描文件",
     syncing: "同步文件",
     committing: "写入 Git 版本",
+    paused: "已暂停",
+    stopped: "已结束",
     success: "已完成",
     failed: "失败",
     interrupted: "已中断",
@@ -210,37 +158,130 @@ function progressForRun(run) {
   const total = Number(run.total_files || 0);
   const copied = Number(run.copied_files || 0);
   const phase = run.phase || "";
-  if (run.status === "success") {
-    return { percent: 100, text: "备份完成", failed: false };
-  }
-  if (run.status === "failed") {
-    return { percent: 100, text: "备份失败", failed: true };
-  }
-  if (phase === "scanning") {
-    return { percent: 12, text: `正在扫描文件：已发现 ${total} 个`, failed: false };
-  }
+  if (run.status === "success") return { percent: 100, text: "备份完成", failed: false };
+  if (run.status === "failed") return { percent: 100, text: "备份失败", failed: true };
+  if (run.status === "stopped") return { percent: Math.max(1, total ? Math.round((copied / total) * 100) : 0), text: "任务已结束，可继续恢复", failed: true };
+  if (run.status === "paused") return { percent: Math.max(1, total ? Math.round((copied / total) * 100) : 10), text: "任务已暂停", failed: false };
+  if (phase === "scanning") return { percent: 12, text: `正在扫描文件：已发现 ${total} 个`, failed: false };
   if (phase === "syncing" && total > 0) {
     const percent = Math.max(15, Math.min(92, Math.round((copied / total) * 100)));
     return { percent, text: `正在同步：${copied}/${total} 个文件`, failed: false };
   }
-  if (phase === "committing") {
-    return { percent: 96, text: "正在写入 Git 版本", failed: false };
-  }
-  if (phase === "connecting") {
-    return { percent: 6, text: "正在连接服务器", failed: false };
-  }
-  if (phase === "preparing") {
-    return { percent: 4, text: "正在准备本地仓库", failed: false };
-  }
+  if (phase === "committing") return { percent: 96, text: "正在写入 Git 版本", failed: false };
+  if (phase === "connecting") return { percent: 6, text: "正在连接服务器", failed: false };
+  if (phase === "preparing") return { percent: 4, text: "正在准备本地仓库", failed: false };
   return { percent: 2, text: phaseLabel(phase), failed: false };
+}
+
+function renderJobs() {
+  $("jobCount").textContent = `${state.jobs.length} 个任务`;
+  const list = $("jobsList");
+  if (!state.jobs.length) {
+    list.className = "task-list empty";
+    list.textContent = "还没有任务。点击右上角“新建任务”开始配置。";
+    return;
+  }
+  list.className = "task-list";
+  list.innerHTML = state.jobs
+    .map(
+      (job) => `
+        <article class="task-row" data-open-job="${job.id}" tabindex="0">
+          <div class="task-main">
+            <p class="task-title">
+              <span class="status-dot ${job.enabled ? "" : "off"}"></span>
+              ${escapeHtml(job.name)}
+            </p>
+            <div class="meta">
+              <span>${escapeHtml(job.username)}@${escapeHtml(job.host)}:${job.port}</span>
+              <span>${formatSchedule(job)}</span>
+              <span>${job.enabled ? "已启用" : "已暂停计划"}</span>
+            </div>
+            <div class="meta">
+              <span>目录：${escapeHtml(job.include_paths.join(", "))}</span>
+              <span>目标：${escapeHtml(job.target_path)}</span>
+            </div>
+          </div>
+          <div class="task-actions">
+            <button class="button secondary compact" data-action="test" data-id="${job.id}" type="button">测试</button>
+            <button class="button primary compact" data-action="run" data-id="${job.id}" type="button">立即备份</button>
+          </div>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function renderRuns() {
+  const list = $("recentTasksList");
+  if (!state.runs.length) {
+    list.className = "timeline empty";
+    list.textContent = "暂无执行记录。";
+    return;
+  }
+  list.className = "timeline";
+  state.runs.forEach((run) => {
+    state.runCache[run.id] = run;
+  });
+  list.innerHTML = state.runs
+    .map(
+      (run) => `
+        <div class="run-row" data-run-id="${run.id}" tabindex="0">
+          <div>
+            <strong>${escapeHtml(statusLabel(run.status))} · ${escapeHtml(jobName(run.job_id))}</strong>
+            <p>${escapeHtml(run.started_at || "")}${run.finished_at ? ` 至 ${escapeHtml(run.finished_at)}` : ""}</p>
+            <p>${escapeHtml(run.message || "无消息")}</p>
+            <p>${escapeHtml(run.commit_hash ? `提交 ${run.commit_hash.slice(0, 12)}` : progressSummary(run))}</p>
+          </div>
+          <div class="run-actions">
+            ${run.status === "running" ? `<button class="button secondary compact" data-run-action="pause" data-id="${run.id}" type="button">暂停</button>` : ""}
+            ${run.status === "paused" || run.status === "stopped" || run.status === "failed" || run.phase === "interrupted" ? `<button class="button primary compact" data-run-action="resume" data-id="${run.id}" type="button">继续</button>` : ""}
+            ${run.status === "running" || run.status === "paused" ? `<button class="button danger compact" data-run-action="stop" data-id="${run.id}" type="button">结束</button>` : ""}
+            <button class="button secondary compact" data-run-action="detail" data-id="${run.id}" type="button">详情</button>
+            <button class="button danger compact" data-run-action="delete" data-id="${run.id}" type="button">删除</button>
+          </div>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function renderVersionJobSelect() {
+  const select = $("versionsJobSelect");
+  if (!state.jobs.length) {
+    select.innerHTML = `<option value="">暂无任务</option>`;
+    return;
+  }
+  if (!state.selectedJobId) state.selectedJobId = state.jobs[0].id;
+  select.innerHTML = state.jobs
+    .map((job) => `<option value="${job.id}" ${job.id === state.selectedJobId ? "selected" : ""}>${escapeHtml(job.name)}</option>`)
+    .join("");
+}
+
+function renderVersions(versions) {
+  const list = $("versionsList");
+  if (!versions.length) {
+    list.className = "version-list empty";
+    list.textContent = "这个任务还没有备份版本。运行一次备份后会显示在这里。";
+    return;
+  }
+  list.className = "version-list";
+  list.innerHTML = versions
+    .map(
+      (version) => `
+        <div class="version-row">
+          <div>
+            <strong>${escapeHtml(version.date)}</strong>
+            <p>${escapeHtml(version.subject)} · ${escapeHtml(version.commit.slice(0, 12))}</p>
+          </div>
+          <a class="button primary compact" href="/api/jobs/${state.selectedJobId}/versions/${version.commit}/download">下载 zip</a>
+        </div>
+      `,
+    )
+    .join("");
 }
 
 function runById(runId) {
   return state.runs.find((run) => run.id === runId) || state.runCache[runId];
-}
-
-function jobById(jobId) {
-  return state.jobs.find((job) => job.id === jobId);
 }
 
 function renderRunDialog(run) {
@@ -309,21 +350,11 @@ function renderRunDialog(run) {
 
 async function refreshRunDialog() {
   if (!state.activeRunId) return;
-  const current = runById(state.activeRunId);
-  if (!current) return;
-  const latestRuns = await api(`/api/runs?job_id=${current.job_id}`);
-  const latest = latestRuns.find((run) => run.id === state.activeRunId);
+  await loadRuns();
+  const latest = runById(state.activeRunId);
   if (!latest) return;
-  state.runCache[latest.id] = latest;
-  state.runs = state.runs.map((run) => (run.id === latest.id ? latest : run));
   renderRunDialog(latest);
-  renderRuns();
-  if (state.page === "versions") {
-    renderRuns("versionRunsList", latestRuns);
-  }
-  if (latest.status !== "running") {
-    stopRunPolling();
-  }
+  if (!["running", "paused"].includes(latest.status)) stopRunPolling();
 }
 
 function stopRunPolling() {
@@ -340,7 +371,7 @@ function openRunDialog(runId) {
   renderRunDialog(run);
   $("runDialog").showModal();
   stopRunPolling();
-  if (run.status === "running") {
+  if (["running", "paused"].includes(run.status)) {
     state.runPollTimer = setInterval(() => {
       refreshRunDialog().catch((error) => toast(`刷新运行详情失败：${error.message}`));
     }, 3000);
@@ -351,43 +382,6 @@ function closeRunDialog() {
   stopRunPolling();
   state.activeRunId = null;
   $("runDialog").close();
-}
-
-function renderVersionJobSelect() {
-  const select = $("versionsJobSelect");
-  if (!state.jobs.length) {
-    select.innerHTML = `<option value="">暂无任务</option>`;
-    return;
-  }
-  if (!state.selectedJobId) {
-    state.selectedJobId = state.jobs[0].id;
-  }
-  select.innerHTML = state.jobs
-    .map((job) => `<option value="${job.id}" ${job.id === state.selectedJobId ? "selected" : ""}>${escapeHtml(job.name)}</option>`)
-    .join("");
-}
-
-function renderVersions(versions) {
-  const list = $("versionsList");
-  if (!versions.length) {
-    list.className = "version-list empty";
-    list.textContent = "这个任务还没有备份版本。运行一次备份后会显示在这里。";
-    return;
-  }
-  list.className = "version-list";
-  list.innerHTML = versions
-    .map(
-      (version) => `
-        <div class="version-row">
-          <div>
-            <strong>${escapeHtml(version.date)}</strong>
-            <p>${escapeHtml(version.subject)} · ${escapeHtml(version.commit.slice(0, 12))}</p>
-          </div>
-          <a class="button primary compact" href="/api/jobs/${state.selectedJobId}/versions/${version.commit}/download">下载 zip</a>
-        </div>
-      `,
-    )
-    .join("");
 }
 
 function resetDialog() {
@@ -456,9 +450,7 @@ function formPayload() {
     minute,
     enabled: $("enabled").checked,
   };
-  if ($("password").value) {
-    payload.password = $("password").value;
-  }
+  if ($("password").value) payload.password = $("password").value;
   return payload;
 }
 
@@ -474,16 +466,17 @@ function validatePayload(payload, isNew) {
 
 async function loadJobs() {
   state.jobs = await api("/api/jobs");
-  if (!state.selectedJobId && state.jobs[0]) {
-    state.selectedJobId = state.jobs[0].id;
-  }
+  if (!state.selectedJobId && state.jobs[0]) state.selectedJobId = state.jobs[0].id;
   renderJobs();
   renderVersionJobSelect();
 }
 
 async function loadRuns() {
   state.runs = await api("/api/runs");
-  renderRuns();
+  state.runs.forEach((run) => {
+    state.runCache[run.id] = run;
+  });
+  if (state.page === "recent") renderRuns();
 }
 
 async function loadSelectedVersions() {
@@ -491,16 +484,10 @@ async function loadSelectedVersions() {
   if (!job) {
     $("versionsList").className = "version-list empty";
     $("versionsList").textContent = "暂无任务。";
-    $("versionRunsList").className = "timeline empty";
-    $("versionRunsList").textContent = "暂无任务。";
     return;
   }
-  const [versions, runs] = await Promise.all([
-    api(`/api/jobs/${job.id}/versions`),
-    api(`/api/runs?job_id=${job.id}`),
-  ]);
+  const versions = await api(`/api/jobs/${job.id}/versions`);
   renderVersions(versions);
-  renderRuns("versionRunsList", runs);
 }
 
 async function saveJob(event) {
@@ -568,16 +555,34 @@ async function deleteCurrentJob() {
 async function runJob(jobId) {
   toast("备份已加入后台队列。");
   await api(`/api/jobs/${jobId}/run`, { method: "POST" });
-  setTimeout(() => {
-    Promise.all([loadRuns(), state.page === "versions" ? loadSelectedVersions() : Promise.resolve()]).catch((error) =>
-      toast(`刷新失败：${error.message}`),
-    );
-  }, 1800);
+  setTimeout(() => loadRuns().catch((error) => toast(`刷新失败：${error.message}`)), 1800);
 }
 
 async function testSavedJob(jobId) {
   await api(`/api/jobs/${jobId}/test`, { method: "POST" });
   toast("SSH 连接成功。");
+}
+
+async function controlRun(runId, action) {
+  await api(`/api/runs/${runId}/control`, {
+    method: "PATCH",
+    body: JSON.stringify({ action }),
+  });
+  const messages = {
+    pause: "已请求暂停。当前文件完成后会暂停。",
+    resume: "已请求继续。停止或中断任务会从已有文件恢复。",
+    stop: "已请求结束。当前文件完成后会停止。",
+  };
+  toast(messages[action] || "操作已提交。");
+  await loadRuns();
+}
+
+async function deleteRun(runId) {
+  const yes = window.confirm("确定删除这条执行记录吗？这不会删除备份仓库文件。");
+  if (!yes) return;
+  await api(`/api/runs/${runId}`, { method: "DELETE" });
+  await loadRuns();
+  toast("执行记录已删除。");
 }
 
 function bindEvents() {
@@ -596,6 +601,7 @@ function bindEvents() {
     toast("已刷新。");
   });
   $("refreshVersionsBtn").addEventListener("click", () => loadSelectedVersions().catch((error) => toast(`刷新失败：${error.message}`)));
+  $("refreshRecentBtn").addEventListener("click", () => loadRuns().catch((error) => toast(`刷新失败：${error.message}`)));
   $("versionsJobSelect").addEventListener("change", (event) => {
     state.selectedJobId = Number(event.target.value);
     loadSelectedVersions().catch((error) => toast(`加载失败：${error.message}`));
@@ -611,9 +617,7 @@ function bindEvents() {
       if (actionButton.dataset.action === "test") testSavedJob(id).catch((error) => toast(`测试失败：${error.message}`));
       return;
     }
-    if (row) {
-      openJobById(Number(row.dataset.openJob)).catch((error) => toast(`打开失败：${error.message}`));
-    }
+    if (row) openJobById(Number(row.dataset.openJob)).catch((error) => toast(`打开失败：${error.message}`));
   });
 
   $("jobsList").addEventListener("keydown", (event) => {
@@ -624,19 +628,29 @@ function bindEvents() {
     openJobById(Number(row.dataset.openJob)).catch((error) => toast(`打开失败：${error.message}`));
   });
 
-  ["runsList", "versionRunsList"].forEach((listId) => {
-    $(listId).addEventListener("click", (event) => {
-      const row = event.target.closest("[data-run-id]");
-      if (!row) return;
-      openRunDialog(Number(row.dataset.runId));
-    });
-    $(listId).addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      const row = event.target.closest("[data-run-id]");
-      if (!row) return;
-      event.preventDefault();
-      openRunDialog(Number(row.dataset.runId));
-    });
+  $("recentTasksList").addEventListener("click", (event) => {
+    const actionButton = event.target.closest("button[data-run-action]");
+    const row = event.target.closest("[data-run-id]");
+    if (actionButton) {
+      event.stopPropagation();
+      const id = Number(actionButton.dataset.id);
+      const action = actionButton.dataset.runAction;
+      if (action === "detail") openRunDialog(id);
+      if (action === "pause") controlRun(id, "pause").catch((error) => toast(`暂停失败：${error.message}`));
+      if (action === "resume") controlRun(id, "resume").catch((error) => toast(`继续失败：${error.message}`));
+      if (action === "stop") controlRun(id, "stop").catch((error) => toast(`结束失败：${error.message}`));
+      if (action === "delete") deleteRun(id).catch((error) => toast(`删除失败：${error.message}`));
+      return;
+    }
+    if (row) openRunDialog(Number(row.dataset.runId));
+  });
+
+  $("recentTasksList").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest("[data-run-id]");
+    if (!row) return;
+    event.preventDefault();
+    openRunDialog(Number(row.dataset.runId));
   });
 
   $("jobForm").addEventListener("submit", saveJob);
@@ -662,7 +676,7 @@ async function init() {
   bindEvents();
   await Promise.all([loadJobs(), loadRuns()]);
   const hashPage = location.hash.replace("#", "");
-  setPage(hashPage === "versions" ? "versions" : "dashboard");
+  setPage(["dashboard", "versions", "recent"].includes(hashPage) ? hashPage : "dashboard");
 }
 
 init().catch((error) => toast(`初始化失败：${error.message}`));

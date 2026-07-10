@@ -182,6 +182,7 @@ def download_tree(
     exclude_patterns: list[str],
     root_remote: str | None = None,
     progress_callback: Callable[[str, int], None] | None = None,
+    seen_local_paths: set[Path] | None = None,
 ) -> tuple[int, int]:
     root_remote = normalize_remote_path(root_remote or remote_path)
     remote_path = normalize_remote_path(remote_path)
@@ -199,21 +200,32 @@ def download_tree(
 
     if stat.S_ISDIR(mode):
         local_path.mkdir(parents=True, exist_ok=True)
+        if seen_local_paths is not None:
+            seen_local_paths.add(local_path.resolve())
         files = 0
         bytes_written = 0
         for child in sftp.listdir_attr(remote_path):
             child_remote = posixpath.join(remote_path, child.filename)
             child_local = local_path / child.filename
             child_files, child_bytes = download_tree(
-                sftp, child_remote, child_local, exclude_patterns, root_remote, progress_callback
+                sftp,
+                child_remote,
+                child_local,
+                exclude_patterns,
+                root_remote,
+                progress_callback,
+                seen_local_paths,
             )
             files += child_files
             bytes_written += child_bytes
         return (files, bytes_written)
 
     local_path.parent.mkdir(parents=True, exist_ok=True)
-    sftp.get(remote_path, str(local_path))
     size = int(attr.st_size or 0)
+    if seen_local_paths is not None:
+        seen_local_paths.add(local_path.resolve())
+    if not (local_path.exists() and local_path.is_file() and local_path.stat().st_size == size):
+        sftp.get(remote_path, str(local_path))
     if progress_callback:
         progress_callback(remote_path, size)
     return (1, size)

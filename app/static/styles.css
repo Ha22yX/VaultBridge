@@ -344,7 +344,8 @@ h2 {
 }
 
 .task-actions,
-.row-actions {
+.row-actions,
+.run-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -360,6 +361,10 @@ h2 {
 }
 
 .run-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
   cursor: pointer;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
@@ -713,13 +718,15 @@ small {
 
   .topbar,
   .task-row,
+  .run-row,
   .version-row {
     display: grid;
   }
 
   .top-actions,
   .task-actions,
-  .row-actions {
+  .row-actions,
+  .run-actions {
     justify-content: stretch;
   }
 

@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from . import repository
 from .backup import create_archive, list_versions, run_backup
 from .db import init_db
-from .schemas import BrowseIn, ConnectionIn, JobIn, JobPatch
+from .schemas import BrowseIn, ConnectionIn, JobIn, JobPatch, RunControlIn
 from .scheduler import reload_jobs, start_scheduler, stop_scheduler
 from .settings import APP_NAME, bind_host, bind_port
 from .ssh_client import connect_sftp, list_remote, normalize_remote_path
@@ -167,6 +167,40 @@ def api_download_version(job_id: int, commit: str) -> FileResponse:
 @app.get("/api/runs")
 def api_runs(job_id: int | None = None) -> list[dict]:
     return repository.list_runs(job_id)
+
+
+@app.patch("/api/runs/{run_id}/control")
+def api_control_run(run_id: int, payload: RunControlIn, background_tasks: BackgroundTasks) -> dict:
+    try:
+        run = repository.get_run(run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if payload.action == "pause":
+        if run["status"] not in {"running"}:
+            raise HTTPException(status_code=400, detail="Only running tasks can be paused")
+        return repository.set_run_control(run_id, "pause")
+
+    if payload.action == "stop":
+        if run["status"] in {"success", "failed", "stopped"}:
+            return run
+        return repository.set_run_control(run_id, "stop")
+
+    if payload.action == "resume":
+        if run["status"] == "paused":
+            return repository.set_run_control(run_id, "run")
+        if run["status"] in {"failed", "stopped"} or run.get("phase") == "interrupted":
+            background_tasks.add_task(run_backup, run["job_id"])
+            return {"status": "queued", "job_id": run["job_id"]}
+        raise HTTPException(status_code=400, detail="This task cannot be resumed")
+
+    raise HTTPException(status_code=400, detail="Invalid action")
+
+
+@app.delete("/api/runs/{run_id}")
+def api_delete_run(run_id: int) -> dict[str, str]:
+    repository.delete_run(run_id)
+    return {"status": "deleted"}
 
 
 if __name__ == "__main__":

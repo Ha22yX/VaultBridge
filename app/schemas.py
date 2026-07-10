@@ -56,3 +56,7 @@ class ConnectionIn(BaseModel):
 
 class BrowseIn(ConnectionIn):
     path: str = Field(default="/", min_length=1, max_length=2048)
+
+
+class RunControlIn(BaseModel):
+    action: str = Field(pattern="^(pause|resume|stop)$")

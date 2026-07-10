@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 import subprocess
 import time
 from datetime import datetime
@@ -12,6 +11,10 @@ from .ssh_client import connect_sftp, count_tree, download_tree, remote_to_snaps
 
 
 class BackupError(RuntimeError):
+    pass
+
+
+class BackupStopped(RuntimeError):
     pass
 
 
@@ -32,7 +35,26 @@ class RunProgress:
         self._last_write = now
         repository.update_run_progress(self.run_id, **fields)
 
+    def check_control(self) -> None:
+        run = repository.get_run(self.run_id)
+        action = run.get("control_action") or "run"
+        if action == "stop":
+            raise BackupStopped("Backup stopped by user.")
+        if action == "pause":
+            repository.set_run_status(self.run_id, "paused", "paused", "Backup paused by user.")
+            while True:
+                time.sleep(1)
+                run = repository.get_run(self.run_id)
+                action = run.get("control_action") or "run"
+                if action == "stop":
+                    raise BackupStopped("Backup stopped by user.")
+                if action == "run":
+                    repository.set_run_status(self.run_id, "running", "syncing", "Backup resumed.")
+                    self._last_write = 0
+                    return
+
     def scan_path(self, path: str, files_found: int = 0, bytes_found: int = 0) -> None:
+        self.check_control()
         self.current_path = path
         self.total_files += files_found
         self.total_bytes += bytes_found
@@ -55,6 +77,7 @@ class RunProgress:
         )
 
     def copied_file(self, path: str, size: int) -> None:
+        self.check_control()
         self.current_path = path
         self.copied_files += 1
         self.copied_bytes += size
@@ -108,6 +131,23 @@ def ensure_repo(job: dict[str, Any]) -> Path:
     return root
 
 
+def cleanup_stale_files(root: Path, seen_paths: set[Path]) -> None:
+    if not root.exists():
+        return
+    root_resolved = root.resolve()
+    for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        resolved = path.resolve()
+        if resolved == root_resolved or resolved in seen_paths:
+            continue
+        if path.is_dir():
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+        else:
+            path.unlink(missing_ok=True)
+
+
 def run_backup(job_id: int) -> dict[str, str | int]:
     job = repository.get_job(job_id, include_password=True)
     run_id = repository.create_run(job_id, "running", "Backup started")
@@ -146,15 +186,16 @@ def run_backup(job_id: int) -> dict[str, str | int]:
             )
             for remote in job["include_paths"]:
                 destination = snapshot / remote_to_snapshot_path(remote)
-                if destination.exists():
-                    shutil.rmtree(destination) if destination.is_dir() else destination.unlink()
+                seen_paths: set[Path] = set()
                 current_files, current_bytes = download_tree(
                     sftp,
                     remote,
                     destination,
                     job["exclude_patterns"],
                     progress_callback=progress.copied_file,
+                    seen_local_paths=seen_paths,
                 )
+                cleanup_stale_files(destination, seen_paths)
                 files += current_files
                 bytes_written += current_bytes
                 progress.flush_copy()
@@ -184,6 +225,10 @@ def run_backup(job_id: int) -> dict[str, str | int]:
             message = f"No changes. Checked {files} files, {bytes_written} bytes."
             repository.finish_run(run_id, "success", message, commit_hash)
         return {"run_id": run_id, "files": files, "bytes": bytes_written, "commit_hash": commit_hash or ""}
+    except BackupStopped as exc:
+        progress.flush_copy()
+        repository.finish_run(run_id, "stopped", str(exc), commit_hash)
+        return {"run_id": run_id, "files": progress.copied_files, "bytes": progress.copied_bytes, "commit_hash": ""}
     except Exception as exc:
         repository.finish_run(run_id, "failed", str(exc), commit_hash)
         raise

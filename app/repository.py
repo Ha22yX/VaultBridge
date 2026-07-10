@@ -112,8 +112,8 @@ def delete_job(job_id: int) -> None:
 def create_run(job_id: int, status: str, message: str | None = None) -> int:
     with connect() as conn:
         cursor = conn.execute(
-            "INSERT INTO runs (job_id, status, message, phase) VALUES (?, ?, ?, ?)",
-            (job_id, status, message, "starting"),
+            "INSERT INTO runs (job_id, status, message, phase, control_action) VALUES (?, ?, ?, ?, ?)",
+            (job_id, status, message, "starting", "run"),
         )
         return int(cursor.lastrowid)
 
@@ -151,16 +151,46 @@ def update_run_progress(
         conn.execute(f"UPDATE runs SET {', '.join(updates)} WHERE id = ?", values)
 
 
+def get_run(run_id: int) -> dict[str, Any]:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+    run = row_to_dict(row)
+    if run is None:
+        raise KeyError(f"Run {run_id} not found")
+    return run
+
+
+def set_run_control(run_id: int, action: str) -> dict[str, Any]:
+    if action not in {"run", "pause", "stop"}:
+        raise ValueError("Invalid run control action")
+    with connect() as conn:
+        conn.execute("UPDATE runs SET control_action = ? WHERE id = ?", (action, run_id))
+    return get_run(run_id)
+
+
+def set_run_status(run_id: int, status: str, phase: str, message: str | None = None) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE runs SET status = ?, phase = ?, message = COALESCE(?, message) WHERE id = ?",
+            (status, phase, message, run_id),
+        )
+
+
 def finish_run(run_id: int, status: str, message: str | None = None, commit_hash: str | None = None) -> None:
     with connect() as conn:
         conn.execute(
             """
             UPDATE runs
-            SET status = ?, phase = ?, message = ?, commit_hash = ?, finished_at = CURRENT_TIMESTAMP
+            SET status = ?, phase = ?, control_action = 'run', message = ?, commit_hash = ?, finished_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
             (status, status, message, commit_hash, run_id),
         )
+
+
+def delete_run(run_id: int) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
 
 
 def list_runs(job_id: int | None = None) -> list[dict[str, Any]]:

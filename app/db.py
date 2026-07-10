@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS runs (
   copied_files INTEGER NOT NULL DEFAULT 0,
   total_bytes INTEGER NOT NULL DEFAULT 0,
   copied_bytes INTEGER NOT NULL DEFAULT 0,
+  control_action TEXT NOT NULL DEFAULT 'run',
   FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
 );
 """
@@ -53,6 +54,7 @@ RUN_COLUMN_MIGRATIONS = {
     "copied_files": "INTEGER NOT NULL DEFAULT 0",
     "total_bytes": "INTEGER NOT NULL DEFAULT 0",
     "copied_bytes": "INTEGER NOT NULL DEFAULT 0",
+    "control_action": "TEXT NOT NULL DEFAULT 'run'",
 }
 
 
@@ -79,7 +81,7 @@ def init_db() -> None:
                 phase = 'interrupted',
                 message = COALESCE(message, '') || ' App restarted before the backup finished.',
                 finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP)
-            WHERE status = 'running'
+            WHERE status IN ('running', 'paused')
             """
         )
 

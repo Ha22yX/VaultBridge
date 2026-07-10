@@ -21,13 +21,14 @@
         </div>
 
         <nav class="nav" aria-label="主导航">
-          <a class="active" href="#dashboard" data-page-link="dashboard">任务概览</a>
+          <a class="active" href="#dashboard" data-page-link="dashboard">任务配置</a>
           <a href="#versions" data-page-link="versions">版本记录</a>
+          <a href="#recent" data-page-link="recent">最近任务</a>
         </nav>
 
         <div class="side-note">
-          <span>简化流程</span>
-          <p>首页只看任务和状态。点击任务即可编辑配置，历史版本集中到版本页面查看。</p>
+          <span>可恢复备份</span>
+          <p>停止或意外中断后再次继续，会跳过本地已经完整存在的文件，从已有快照继续同步。</p>
         </div>
       </aside>
 
@@ -36,9 +37,9 @@
           <section id="dashboardPage" class="page active-page">
             <header class="topbar">
               <div>
-                <p class="eyebrow">Backup console</p>
-                <h1>备份任务</h1>
-                <p class="subtitle">管理服务器到 NAS 的自动备份任务。点击任务行可编辑配置。</p>
+                <p class="eyebrow">Backup config</p>
+                <h1>任务配置</h1>
+                <p class="subtitle">管理服务器到 NAS 的自动备份配置。点击任务行可编辑 SSH、目录和计划。</p>
               </div>
               <div class="top-actions">
                 <button id="refreshBtn" class="button secondary" type="button">刷新</button>
@@ -46,29 +47,16 @@
               </div>
             </header>
 
-            <section class="dashboard-grid">
-              <article class="panel task-panel">
-                <div class="panel-header">
-                  <div>
-                    <p class="eyebrow">Tasks</p>
-                    <h2>任务列表</h2>
-                  </div>
-                  <span id="jobCount" class="badge">0 个任务</span>
+            <article class="panel task-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Jobs</p>
+                  <h2>备份任务</h2>
                 </div>
-                <div id="jobsList" class="task-list empty">还没有任务。点击右上角“新建任务”开始配置。</div>
-              </article>
-
-              <article class="panel runs-panel">
-                <div class="panel-header">
-                  <div>
-                    <p class="eyebrow">Runs</p>
-                    <h2>最近运行</h2>
-                  </div>
-                  <span class="badge">50 条</span>
-                </div>
-                <div id="runsList" class="timeline empty">暂无运行记录。</div>
-              </article>
-            </section>
+                <span id="jobCount" class="badge">0 个任务</span>
+              </div>
+              <div id="jobsList" class="task-list empty">还没有任务。点击右上角“新建任务”开始配置。</div>
+            </article>
           </section>
 
           <section id="versionsPage" class="page">
@@ -76,7 +64,7 @@
               <div>
                 <p class="eyebrow">Versions</p>
                 <h1>版本记录</h1>
-                <p class="subtitle">选择一个备份任务，查看 Git 历史版本和该任务的运行记录。</p>
+                <p class="subtitle">选择一个备份任务，查看 Git 历史版本并下载任意时间点的 zip。</p>
               </div>
               <button id="refreshVersionsBtn" class="button secondary" type="button">刷新版本</button>
             </header>
@@ -88,27 +76,37 @@
               </label>
             </section>
 
-            <section class="version-grid">
-              <article class="panel">
-                <div class="panel-header">
-                  <div>
-                    <p class="eyebrow">Commits</p>
-                    <h2>备份版本</h2>
-                  </div>
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Commits</p>
+                  <h2>备份版本</h2>
                 </div>
-                <div id="versionsList" class="version-list empty">选择任务后查看版本。</div>
-              </article>
+              </div>
+              <div id="versionsList" class="version-list empty">选择任务后查看版本。</div>
+            </article>
+          </section>
 
-              <article class="panel">
-                <div class="panel-header">
-                  <div>
-                    <p class="eyebrow">History</p>
-                    <h2>历史记录</h2>
-                  </div>
+          <section id="recentPage" class="page">
+            <header class="topbar">
+              <div>
+                <p class="eyebrow">Recent tasks</p>
+                <h1>最近任务</h1>
+                <p class="subtitle">查看所有备份执行记录，并对运行中的任务执行暂停、继续、结束或删除。</p>
+              </div>
+              <button id="refreshRecentBtn" class="button secondary" type="button">刷新任务</button>
+            </header>
+
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Runs</p>
+                  <h2>执行列表</h2>
                 </div>
-                <div id="versionRunsList" class="timeline empty">选择任务后查看运行记录。</div>
-              </article>
-            </section>
+                <span class="badge">最近 50 条</span>
+              </div>
+              <div id="recentTasksList" class="timeline empty">暂无执行记录。</div>
+            </article>
           </section>
         </div>
       </main>
