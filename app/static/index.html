@@ -112,6 +112,10 @@
                       placeholder="只保存在本机加密数据库中"
                     />
                   </label>
+                  <div class="inline-tools">
+                    <button id="testDraftBtn" class="button secondary" type="button">测试当前连接</button>
+                    <span id="connectionStatus" class="status-text">先测试连接，再选择目录。</span>
+                  </div>
                 </div>
 
                 <div class="form-section">
@@ -189,12 +193,12 @@
                     <p class="eyebrow">浏览</p>
                     <h2>远程目录</h2>
                   </div>
-                  <button id="browseBtn" class="button secondary compact" type="button">读取目录</button>
+                  <button id="browseBtn" class="button secondary compact" type="button">用当前连接读取</button>
                 </div>
                 <div class="browse-bar">
                   <input id="browsePath" value="/www/wwwroot" />
                 </div>
-                <div id="browserList" class="browser empty">选择一个任务后可以查看服务器目录。</div>
+                <div id="browserList" class="browser empty">填写 SSH 信息后，可以直接读取目录，不需要先保存任务。</div>
               </article>
 
               <div class="split-panels">

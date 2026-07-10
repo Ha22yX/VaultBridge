@@ -6,6 +6,8 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 const defaults = {
+  targetPath: "/storage/Files/服务器备份/147.189.128.208",
+  includePath: "/www/wwwroot",
   excludePatterns: [".git", "node_modules", ".cache", "cache", "logs", "*.log", "tmp", ".DS_Store"],
 };
 
@@ -16,7 +18,13 @@ function toast(message) {
   clearTimeout(window.__toastTimer);
   window.__toastTimer = setTimeout(() => {
     node.hidden = true;
-  }, 3600);
+  }, 4200);
+}
+
+function setConnectionStatus(message, kind = "") {
+  const node = $("connectionStatus");
+  node.textContent = message;
+  node.className = `status-text ${kind}`.trim();
 }
 
 async function api(path, options = {}) {
@@ -44,10 +52,18 @@ function lines(value) {
     .filter(Boolean);
 }
 
+function uniqueLines(value, newLine) {
+  const current = lines(value);
+  if (!current.includes(newLine)) current.push(newLine);
+  return current.join("\n");
+}
+
 function setDefaults() {
-  $("includePaths").value = "/www/wwwroot";
+  $("includePaths").value = defaults.includePath;
   $("excludePatterns").value = defaults.excludePatterns.join("\n");
-  $("targetPath").value = "/storage/Files/服务器备份/147.189.128.208";
+  $("targetPath").value = defaults.targetPath;
+  $("browsePath").value = defaults.includePath;
+  setConnectionStatus("先测试连接，再选择目录。");
 }
 
 function formatSchedule(job) {
@@ -63,12 +79,29 @@ function activeJob() {
   return state.jobs.find((job) => job.id === state.selectedJobId) || state.jobs[0];
 }
 
+function connectionPayload() {
+  return {
+    host: $("host").value.trim(),
+    port: Number($("port").value || 22),
+    username: $("username").value.trim(),
+    password: $("password").value,
+  };
+}
+
+function validateConnectionPayload(payload) {
+  if (!payload.host) return "请填写 SSH 地址。";
+  if (!payload.port || payload.port < 1 || payload.port > 65535) return "请填写正确的 SSH 端口。";
+  if (!payload.username) return "请填写 SSH 用户名。";
+  if (!payload.password) return "请填写 SSH 密码。编辑旧任务时，如不想重新输入密码，请用任务列表里的测试或浏览。";
+  return "";
+}
+
 function renderJobs() {
   $("jobCount").textContent = `${state.jobs.length} 个任务`;
   const list = $("jobsList");
   if (!state.jobs.length) {
     list.className = "list empty";
-    list.textContent = "还没有任务。先保存左侧配置。";
+    list.textContent = "还没有任务。先在左侧测试连接、选择目录，然后保存任务。";
     return;
   }
 
@@ -95,7 +128,8 @@ function renderJobs() {
           <div class="item-actions">
             <button class="button secondary compact" data-action="select" data-id="${job.id}" type="button">选择</button>
             <button class="button secondary compact" data-action="edit" data-id="${job.id}" type="button">编辑</button>
-            <button class="button secondary compact" data-action="test" data-id="${job.id}" type="button">测试连接</button>
+            <button class="button secondary compact" data-action="test" data-id="${job.id}" type="button">测试</button>
+            <button class="button secondary compact" data-action="browse-saved" data-id="${job.id}" type="button">浏览</button>
             <button class="button primary compact" data-action="run" data-id="${job.id}" type="button">立即备份</button>
             <button class="button danger compact" data-action="delete" data-id="${job.id}" type="button">删除</button>
           </div>
@@ -148,6 +182,7 @@ function fillForm(job) {
   $("dayOfWeek").value = job.day_of_week ?? 0;
   $("timeOfDay").value = `${String(job.hour).padStart(2, "0")}:${String(job.minute).padStart(2, "0")}`;
   $("enabled").checked = job.enabled;
+  setConnectionStatus("正在编辑已保存任务。留空密码不会覆盖旧密码。");
 }
 
 function resetForm() {
@@ -176,7 +211,7 @@ async function loadVersions() {
   const list = $("versionsList");
   if (!job) {
     list.className = "list empty";
-    list.textContent = "先创建并选择一个任务。";
+    list.textContent = "先保存一个任务，再查看历史版本。";
     return;
   }
   const versions = await api(`/api/jobs/${job.id}/versions`);
@@ -206,39 +241,90 @@ async function loadVersions() {
     .join("");
 }
 
-async function browseRemote() {
-  const job = activeJob();
-  const list = $("browserList");
-  if (!job) {
-    list.className = "browser empty";
-    list.textContent = "先创建并选择一个任务。";
+async function testCurrentConnection() {
+  const payload = connectionPayload();
+  const validation = validateConnectionPayload(payload);
+  if (validation) {
+    setConnectionStatus(validation, "bad");
+    toast(validation);
     return;
   }
-  const path = encodeURIComponent($("browsePath").value || "/");
-  const entries = await api(`/api/jobs/${job.id}/browse?path=${path}`);
+  setConnectionStatus("正在连接 SSH...", "");
+  await api("/api/ssh/test", { method: "POST", body: JSON.stringify(payload) });
+  setConnectionStatus("连接成功，可以读取远程目录。", "ok");
+  toast("SSH 连接成功。");
+}
+
+async function browseRemote(useSavedJobId = null) {
+  const list = $("browserList");
+  const path = $("browsePath").value || "/";
+  let entries;
+
+  if (useSavedJobId) {
+    entries = await api(`/api/jobs/${useSavedJobId}/browse?path=${encodeURIComponent(path)}`);
+  } else {
+    const payload = { ...connectionPayload(), path };
+    const validation = validateConnectionPayload(payload);
+    if (validation) {
+      list.className = "browser empty";
+      list.textContent = validation;
+      setConnectionStatus(validation, "bad");
+      return;
+    }
+    entries = await api("/api/ssh/browse", { method: "POST", body: JSON.stringify(payload) });
+    setConnectionStatus("目录读取成功。可以点“加入备份目录”。", "ok");
+  }
+
   if (!entries.length) {
     list.className = "browser empty";
     list.textContent = "这个目录是空的。";
     return;
   }
+
+  const parent = parentPath(path);
   list.className = "browser";
-  list.innerHTML = entries
-    .map(
-      (entry) => `
-        <div class="browser-row">
-          <div>
-            <div class="browser-name">${entry.is_dir ? "目录" : "文件"} ${escapeHtml(entry.name)}</div>
-            <div class="meta">${escapeHtml(entry.path)} · ${entry.size} bytes</div>
+  list.innerHTML = `
+    ${
+      parent
+        ? `<div class="browser-row">
+            <div>
+              <div class="browser-name">上级目录</div>
+              <div class="meta">${escapeHtml(parent)}</div>
+            </div>
+            <div class="browser-actions">
+              <button class="button secondary compact" data-action="open-dir" data-path="${escapeAttr(parent)}" type="button">打开</button>
+            </div>
+          </div>`
+        : ""
+    }
+    ${entries
+      .map(
+        (entry) => `
+          <div class="browser-row">
+            <div>
+              <div class="browser-name">${entry.is_dir ? "目录" : "文件"} ${escapeHtml(entry.name)}</div>
+              <div class="meta">${escapeHtml(entry.path)} · ${entry.size} bytes</div>
+            </div>
+            <div class="browser-actions">
+              ${
+                entry.is_dir
+                  ? `<button class="button secondary compact" data-action="open-dir" data-path="${escapeAttr(entry.path)}" type="button">打开</button>
+                     <button class="button primary compact" data-action="add-dir" data-path="${escapeAttr(entry.path)}" type="button">加入备份目录</button>`
+                  : ""
+              }
+            </div>
           </div>
-          ${
-            entry.is_dir
-              ? `<button class="button secondary compact" data-action="open-dir" data-path="${escapeAttr(entry.path)}" type="button">打开</button>`
-              : ""
-          }
-        </div>
-      `,
-    )
-    .join("");
+        `,
+      )
+      .join("")}
+  `;
+}
+
+function parentPath(path) {
+  const clean = (path || "/").replace(/\/+$/, "") || "/";
+  if (clean === "/") return "";
+  const index = clean.lastIndexOf("/");
+  return index <= 0 ? "/" : clean.slice(0, index);
 }
 
 function escapeHtml(value) {
@@ -280,6 +366,10 @@ async function handleSubmit(event) {
     toast("新任务必须填写 SSH 密码。");
     return;
   }
+  if (!payload.include_paths.length) {
+    toast("请至少选择或填写一个备份目录。");
+    return;
+  }
 
   try {
     const saved = jobId
@@ -318,6 +408,12 @@ async function handleJobAction(event) {
       await api(`/api/jobs/${id}/test`, { method: "POST" });
       toast("SSH 连接成功。");
     }
+    if (action === "browse-saved") {
+      state.selectedJobId = id;
+      $("browsePath").value = job.include_paths[0] || defaults.includePath;
+      await browseRemote(id);
+      renderJobs();
+    }
     if (action === "run") {
       button.disabled = true;
       toast("备份已加入后台队列。");
@@ -327,7 +423,7 @@ async function handleJobAction(event) {
       }, 1800);
     }
     if (action === "delete") {
-      const yes = window.confirm(`确定删除任务「${job.name}」吗？本操作不删除备份仓库文件。`);
+      const yes = window.confirm(`确定删除任务“${job.name}”吗？本操作不删除备份仓库文件。`);
       if (!yes) return;
       await api(`/api/jobs/${id}`, { method: "DELETE" });
       if (state.selectedJobId === id) state.selectedJobId = null;
@@ -344,17 +440,32 @@ async function handleJobAction(event) {
 function bindEvents() {
   $("jobForm").addEventListener("submit", handleSubmit);
   $("resetFormBtn").addEventListener("click", resetForm);
+  $("testDraftBtn").addEventListener("click", () => testCurrentConnection().catch((error) => {
+    setConnectionStatus(error.message, "bad");
+    toast(`连接失败：${error.message}`);
+  }));
   $("refreshBtn").addEventListener("click", async () => {
     await Promise.all([loadJobs(), loadRuns()]);
     toast("已刷新。");
   });
   $("jobsList").addEventListener("click", handleJobAction);
-  $("browseBtn").addEventListener("click", () => browseRemote().catch((error) => toast(`读取失败：${error.message}`)));
+  $("browseBtn").addEventListener("click", () => browseRemote().catch((error) => {
+    setConnectionStatus(error.message, "bad");
+    toast(`读取失败：${error.message}`);
+  }));
   $("browserList").addEventListener("click", (event) => {
-    const button = event.target.closest("button[data-action='open-dir']");
-    if (!button) return;
-    $("browsePath").value = button.dataset.path;
-    browseRemote().catch((error) => toast(`读取失败：${error.message}`));
+    const openButton = event.target.closest("button[data-action='open-dir']");
+    const addButton = event.target.closest("button[data-action='add-dir']");
+    if (openButton) {
+      $("browsePath").value = openButton.dataset.path;
+      browseRemote(state.selectedJobId && !$("password").value ? state.selectedJobId : null).catch((error) =>
+        toast(`读取失败：${error.message}`),
+      );
+    }
+    if (addButton) {
+      $("includePaths").value = uniqueLines($("includePaths").value, addButton.dataset.path);
+      toast("已加入备份目录。");
+    }
   });
   $("loadVersionsBtn").addEventListener("click", () => loadVersions().catch((error) => toast(`加载失败：${error.message}`)));
 }

@@ -46,3 +46,13 @@ class JobPatch(BaseModel):
     minute: int | None = Field(default=None, ge=0, le=59)
     enabled: bool | None = None
 
+
+class ConnectionIn(BaseModel):
+    host: str = Field(min_length=1, max_length=255)
+    port: int = Field(default=22, ge=1, le=65535)
+    username: str = Field(min_length=1, max_length=80)
+    password: str = Field(min_length=1, max_length=4096)
+
+
+class BrowseIn(ConnectionIn):
+    path: str = Field(default="/", min_length=1, max_length=2048)

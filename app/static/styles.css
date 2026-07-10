@@ -395,6 +395,29 @@ details label {
   padding-top: 2px;
 }
 
+.inline-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.status-text {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.status-text.ok {
+  color: var(--accent-dark);
+  font-weight: 760;
+}
+
+.status-text.bad {
+  color: var(--danger);
+  font-weight: 760;
+}
+
 .button {
   display: inline-flex;
   min-height: 38px;
@@ -528,6 +551,13 @@ details label {
   border-radius: var(--radius-sm);
   background: #fff;
   padding: 10px 11px;
+}
+
+.browser-actions {
+  display: flex;
+  gap: 7px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .browser-name {

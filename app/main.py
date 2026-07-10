@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from . import repository
 from .backup import create_archive, list_versions, run_backup
 from .db import init_db
-from .schemas import JobIn, JobPatch
+from .schemas import BrowseIn, ConnectionIn, JobIn, JobPatch
 from .scheduler import reload_jobs, start_scheduler, stop_scheduler
 from .settings import APP_NAME, bind_host, bind_port
 from .ssh_client import connect_sftp, list_remote, normalize_remote_path
@@ -69,6 +69,32 @@ def api_delete_job(job_id: int) -> dict[str, str]:
     repository.delete_job(job_id)
     reload_jobs()
     return {"status": "deleted"}
+
+
+@app.post("/api/ssh/test")
+def api_test_connection(payload: ConnectionIn) -> dict[str, str]:
+    try:
+        ssh, sftp = connect_sftp(payload.host, payload.port, payload.username, payload.password)
+        try:
+            return {"status": "ok", "cwd": sftp.getcwd() or "/"}
+        finally:
+            sftp.close()
+            ssh.close()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/ssh/browse")
+def api_browse_connection(payload: BrowseIn) -> list[dict]:
+    try:
+        ssh, sftp = connect_sftp(payload.host, payload.port, payload.username, payload.password)
+        try:
+            return [entry.__dict__ for entry in list_remote(sftp, normalize_remote_path(payload.path))]
+        finally:
+            sftp.close()
+            ssh.close()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/jobs/{job_id}/test")
