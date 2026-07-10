@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 import paramiko
+from paramiko.ssh_exception import NoValidConnectionsError
 
 
 @dataclass
@@ -47,7 +48,7 @@ def friendly_ssh_error(exc: Exception, host: str, port: int) -> SSHConnectionErr
         return SSHConnectionError(f"SSH 认证失败：请检查用户名、密码，以及服务器是否允许该用户密码登录。目标：{target}")
     if isinstance(exc, paramiko.BadHostKeyException):
         return SSHConnectionError(f"SSH 主机密钥校验失败。目标：{target}")
-    if isinstance(exc, paramiko.NoValidConnectionsError):
+    if isinstance(exc, NoValidConnectionsError):
         return SSHConnectionError(f"无法连接到 SSH 端口：请检查 IP、端口、安全组和防火墙。目标：{target}")
     if isinstance(exc, (socket.timeout, TimeoutError)):
         return SSHConnectionError(f"SSH 连接超时：端口可能被防火墙拦截，或服务器响应太慢。目标：{target}")

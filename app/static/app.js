@@ -197,6 +197,8 @@ function resetDialog() {
   $("dialogTitle").textContent = "新建任务";
   $("deleteFromDialogBtn").hidden = true;
   $("password").required = true;
+  $("password").type = "password";
+  $("showPassword").checked = false;
   $("targetPath").value = defaults.targetPath;
   $("includePaths").value = defaults.includePath;
   $("port").value = 22;
@@ -217,16 +219,22 @@ function openJobDialog(job = null) {
     $("host").value = job.host;
     $("port").value = job.port;
     $("username").value = job.username;
+    $("password").value = job.password || "";
     $("targetPath").value = job.target_path;
     $("includePaths").value = job.include_paths.join("\n");
     $("scheduleKind").value = job.schedule_kind;
     $("dayOfWeek").value = job.day_of_week ?? 0;
     $("timeOfDay").value = `${String(job.hour).padStart(2, "0")}:${String(job.minute).padStart(2, "0")}`;
     $("enabled").checked = job.enabled;
-    setConnectionStatus("编辑任务时，密码留空表示不修改旧密码。");
+    setConnectionStatus("已载入当前 SSH 密码，可直接测试或修改。");
   }
   $("jobDialog").showModal();
   $("name").focus();
+}
+
+async function openJobById(jobId) {
+  const job = await api(`/api/jobs/${jobId}`);
+  openJobDialog(job);
 }
 
 function closeJobDialog() {
@@ -405,8 +413,7 @@ function bindEvents() {
       return;
     }
     if (row) {
-      const job = state.jobs.find((item) => item.id === Number(row.dataset.openJob));
-      if (job) openJobDialog(job);
+      openJobById(Number(row.dataset.openJob)).catch((error) => toast(`打开失败：${error.message}`));
     }
   });
 
@@ -415,12 +422,14 @@ function bindEvents() {
     const row = event.target.closest("[data-open-job]");
     if (!row) return;
     event.preventDefault();
-    const job = state.jobs.find((item) => item.id === Number(row.dataset.openJob));
-    if (job) openJobDialog(job);
+    openJobById(Number(row.dataset.openJob)).catch((error) => toast(`打开失败：${error.message}`));
   });
 
   $("jobForm").addEventListener("submit", saveJob);
   $("testConnectionBtn").addEventListener("click", testDialogConnection);
+  $("showPassword").addEventListener("change", () => {
+    $("password").type = $("showPassword").checked ? "text" : "password";
+  });
   $("deleteFromDialogBtn").addEventListener("click", () => deleteCurrentJob().catch((error) => toast(`删除失败：${error.message}`)));
   $("closeDialogBtn").addEventListener("click", closeJobDialog);
   $("cancelDialogBtn").addEventListener("click", closeJobDialog);

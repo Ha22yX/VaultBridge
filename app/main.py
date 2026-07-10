@@ -47,6 +47,14 @@ def api_list_jobs() -> list[dict]:
     return repository.list_jobs()
 
 
+@app.get("/api/jobs/{job_id}")
+def api_get_job(job_id: int) -> dict:
+    try:
+        return repository.get_job(job_id, include_password=True)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post("/api/jobs")
 def api_create_job(payload: JobIn) -> dict:
     job = repository.create_job(payload)
