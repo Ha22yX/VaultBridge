@@ -82,11 +82,11 @@ def effective_excludes(job: dict[str, Any]) -> list[str]:
 
 
 def rsync_worker_count() -> int:
-    raw = os.getenv("VAULTBRIDGE_RSYNC_WORKERS", "2")
+    raw = os.getenv("VAULTBRIDGE_RSYNC_WORKERS", "3")
     try:
         return max(1, min(8, int(raw)))
     except ValueError:
-        return 2
+        return 3
 
 
 class RunProgress:
