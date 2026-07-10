@@ -1,14 +1,20 @@
 const state = {
   jobs: [],
   runs: [],
+  versions: [],
   selectedJobId: null,
   page: "dashboard",
   activeRunId: null,
-  runPollTimer: null,
+  activeVersion: null,
+  activeVersionPath: "",
   runCache: {},
+  syncTimer: null,
+  syncBusy: false,
+  highlightRunId: null,
 };
 
 const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const defaults = {
   targetPath: "/server-backups/example-site",
@@ -80,7 +86,7 @@ function lines(value) {
 }
 
 function escapeHtml(value) {
-  return String(value)
+  return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -101,10 +107,21 @@ function formatBytes(bytes) {
   return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[index]}`;
 }
 
+function formatClock() {
+  return new Date().toLocaleTimeString("zh-CN", { hour12: false });
+}
+
 function setConnectionStatus(message, kind = "") {
   const node = $("connectionStatus");
   node.textContent = message;
   node.className = `status-text ${kind}`.trim();
+}
+
+function setLiveStatus(message, syncing = false) {
+  const node = $("liveStatus");
+  if (!node) return;
+  node.textContent = message;
+  node.classList.toggle("syncing", syncing);
 }
 
 function formatSchedule(job) {
@@ -114,35 +131,6 @@ function formatSchedule(job) {
     return `${days[job.day_of_week ?? 0]} ${time}`;
   }
   return `每天 ${time}`;
-}
-
-function jobName(jobId) {
-  return state.jobs.find((job) => job.id === jobId)?.name || `任务 #${jobId}`;
-}
-
-function jobById(jobId) {
-  return state.jobs.find((job) => job.id === jobId);
-}
-
-function activeJob() {
-  return state.jobs.find((job) => job.id === state.selectedJobId) || state.jobs[0];
-}
-
-function setPage(page) {
-  state.page = page;
-  $("dashboardPage").classList.toggle("active-page", page === "dashboard");
-  $("versionsPage").classList.toggle("active-page", page === "versions");
-  $("recentPage").classList.toggle("active-page", page === "recent");
-  document.querySelectorAll("[data-page-link]").forEach((link) => {
-    link.classList.toggle("active", link.dataset.pageLink === page);
-  });
-  if (page === "versions") {
-    renderVersionJobSelect();
-    loadSelectedVersions().catch((error) => toast(`加载失败：${error.message}`));
-  }
-  if (page === "recent") {
-    loadRuns().catch((error) => toast(`加载失败：${error.message}`));
-  }
 }
 
 function statusLabel(status) {
@@ -176,19 +164,68 @@ function phaseLabel(phase) {
   return labels[phase] || phase || "等待状态";
 }
 
+function jobName(jobId) {
+  return state.jobs.find((job) => job.id === jobId)?.name || `任务 #${jobId}`;
+}
+
+function jobById(jobId) {
+  return state.jobs.find((job) => job.id === jobId);
+}
+
+function activeJob() {
+  return state.jobs.find((job) => job.id === state.selectedJobId) || state.jobs[0];
+}
+
+function reconcileSelectedJob() {
+  if (!state.jobs.length) {
+    state.selectedJobId = null;
+    return;
+  }
+  if (!state.jobs.some((job) => job.id === state.selectedJobId)) {
+    state.selectedJobId = state.jobs[0].id;
+  }
+}
+
+function setPage(page, options = {}) {
+  state.page = page;
+  document.body.classList.toggle("route-glide", Boolean(options.animate));
+  clearTimeout(window.__routeAnimationTimer);
+  window.__routeAnimationTimer = setTimeout(() => document.body.classList.remove("route-glide"), 520);
+
+  $("dashboardPage").classList.toggle("active-page", page === "dashboard");
+  $("versionsPage").classList.toggle("active-page", page === "versions");
+  $("recentPage").classList.toggle("active-page", page === "recent");
+  document.querySelectorAll("[data-page-link]").forEach((link) => {
+    link.classList.toggle("active", link.dataset.pageLink === page);
+  });
+  if (page === "versions") {
+    renderVersionJobSelect();
+    loadSelectedVersions().catch((error) => toast(`加载版本失败：${error.message}`));
+  }
+  if (page === "recent") {
+    renderRuns();
+  }
+}
+
+function navigateTo(page, options = {}) {
+  history.replaceState(null, "", `#${page}`);
+  setPage(page, options);
+}
+
 function progressSummary(run) {
   const copied = Number(run.copied_files || 0);
   const total = Number(run.total_files || 0);
   if (total > 0) return `${copied}/${total} 个文件`;
-  if (copied > 0) return `已接收 ${copied} 个文件`;
+  if (copied > 0) return `已处理 ${copied} 个文件`;
   if (run.phase) return phaseLabel(run.phase);
-  return "暂无提交";
+  return "暂无进度";
 }
 
 function progressForRun(run) {
   const total = Number(run.total_files || 0);
   const copied = Number(run.copied_files || 0);
   const copiedBytes = Number(run.copied_bytes || 0);
+  const totalBytes = Number(run.total_bytes || 0);
   const phase = run.phase || "";
   if (run.status === "success") return { percent: 100, text: "备份完成", failed: false };
   if (run.status === "failed") return { percent: 100, text: "备份失败", failed: true };
@@ -196,22 +233,23 @@ function progressForRun(run) {
   if (run.status === "paused") return { percent: Math.max(1, total ? Math.round((copied / total) * 100) : 10), text: "任务已暂停", failed: false };
   if (phase === "rsyncing" && total > 0) {
     const percent = Math.max(8, Math.min(94, Math.round((copied / total) * 100)));
-    return { percent, text: `正在增量同步：已检查 ${copied}/${total} 项 · 已传输 ${formatBytes(copiedBytes)}`, failed: false };
+    return { percent, text: `正在增量同步：已检查 ${copied}/${total} 项，已传输 ${formatBytes(copiedBytes)}`, failed: false };
   }
   if (phase === "rsyncing") return { percent: 12, text: `正在增量同步：已传输 ${formatBytes(copiedBytes)}`, failed: false };
   if (phase === "estimating") return { percent: 10, text: "正在服务器端快速统计文件数量", failed: false };
   if (phase === "scanning") return { percent: 12, text: `正在扫描文件：已发现 ${total} 个`, failed: false };
   if (phase === "syncing" && total > 0) {
     const percent = Math.max(15, Math.min(92, Math.round((copied / total) * 100)));
-    return { percent, text: `正在快速传输：${copied}/${total} 个文件 · ${formatBytes(copiedBytes)}`, failed: false };
+    return { percent, text: `正在快速传输：${copied}/${total} 个文件，${formatBytes(copiedBytes)}`, failed: false };
   }
   if (phase === "syncing") {
     const percent = Math.min(90, 18 + (copied % 40));
-    return { percent, text: `正在快速传输：已接收 ${copied} 个文件 · ${formatBytes(copiedBytes)}`, failed: false };
+    return { percent, text: `正在快速传输：已接收 ${copied} 个文件，${formatBytes(copiedBytes)}`, failed: false };
   }
   if (phase === "committing") return { percent: 96, text: "正在写入 Git 版本", failed: false };
   if (phase === "connecting") return { percent: 6, text: "正在连接服务器", failed: false };
   if (phase === "preparing") return { percent: 4, text: "正在准备本地仓库", failed: false };
+  if (totalBytes) return { percent: 4, text: `准备同步 ${formatBytes(totalBytes)}`, failed: false };
   return { percent: 2, text: phaseLabel(phase), failed: false };
 }
 
@@ -219,8 +257,11 @@ function renderJobs() {
   $("jobCount").textContent = `${state.jobs.length} 个任务`;
   const list = $("jobsList");
   if (!state.jobs.length) {
-    list.className = "task-list empty";
-    list.textContent = "还没有任务。点击右上角“新建任务”开始配置。";
+    list.className = "task-list empty-state";
+    list.innerHTML = `
+      <strong>还没有备份任务</strong>
+      <p>点击右上角“新建任务”，填写 SSH、备份目录和计划时间。</p>
+    `;
     return;
   }
   list.className = "task-list";
@@ -245,7 +286,7 @@ function renderJobs() {
           </div>
           <div class="task-actions">
             <button class="button secondary compact" data-action="test" data-id="${job.id}" type="button">测试</button>
-            <button class="button primary compact" data-action="run" data-id="${job.id}" type="button">立即备份</button>
+            <button class="button primary compact launch-button" data-action="run" data-id="${job.id}" type="button">立即备份</button>
           </div>
         </article>
       `,
@@ -256,8 +297,11 @@ function renderJobs() {
 function renderRuns() {
   const list = $("recentTasksList");
   if (!state.runs.length) {
-    list.className = "timeline empty";
-    list.textContent = "暂无执行记录。";
+    list.className = "timeline empty-state";
+    list.innerHTML = `
+      <strong>暂无执行记录</strong>
+      <p>从任务配置里点击“立即备份”，这里会自动出现新任务。</p>
+    `;
     return;
   }
   list.className = "timeline";
@@ -265,13 +309,16 @@ function renderRuns() {
     state.runCache[run.id] = run;
   });
   list.innerHTML = state.runs
-    .map(
-      (run) => `
-        <div class="run-row" data-run-id="${run.id}" tabindex="0">
-          <div>
+    .map((run) => {
+      const progress = progressForRun(run);
+      const highlighted = state.highlightRunId === run.id ? " highlighted" : "";
+      return `
+        <article class="run-row${highlighted}" data-run-id="${run.id}" tabindex="0">
+          <div class="run-copy">
             <strong>${escapeHtml(statusLabel(run.status))} · ${escapeHtml(jobName(run.job_id))}</strong>
             <p>${escapeHtml(run.started_at || "")}${run.finished_at ? ` 至 ${escapeHtml(run.finished_at)}` : ""}</p>
-            <p>${escapeHtml(run.message || "无消息")}</p>
+            <p>${escapeHtml(run.message || "暂无消息")}</p>
+            <div class="mini-progress" aria-hidden="true"><span style="width: ${progress.percent}%"></span></div>
             <p>${escapeHtml(run.commit_hash ? `提交 ${run.commit_hash.slice(0, 12)}` : progressSummary(run))}</p>
           </div>
           <div class="run-actions">
@@ -281,9 +328,9 @@ function renderRuns() {
             <button class="button secondary compact" data-run-action="detail" data-id="${run.id}" type="button">详情</button>
             <button class="button danger compact" data-run-action="delete" data-id="${run.id}" type="button">删除</button>
           </div>
-        </div>
-      `,
-    )
+        </article>
+      `;
+    })
     .join("");
 }
 
@@ -293,7 +340,7 @@ function renderVersionJobSelect() {
     select.innerHTML = `<option value="">暂无任务</option>`;
     return;
   }
-  if (!state.selectedJobId) state.selectedJobId = state.jobs[0].id;
+  reconcileSelectedJob();
   select.innerHTML = state.jobs
     .map((job) => `<option value="${job.id}" ${job.id === state.selectedJobId ? "selected" : ""}>${escapeHtml(job.name)}</option>`)
     .join("");
@@ -301,22 +348,33 @@ function renderVersionJobSelect() {
 
 function renderVersions(versions) {
   const list = $("versionsList");
+  $("versionCount").textContent = `${versions.length} 个版本`;
   if (!versions.length) {
-    list.className = "version-list empty";
-    list.textContent = "这个任务还没有备份版本。运行一次备份后会显示在这里。";
+    list.className = "version-list empty-state";
+    list.innerHTML = `
+      <strong>还没有备份版本</strong>
+      <p>运行一次备份后，这里会显示 Git 历史版本和可下载快照。</p>
+    `;
     return;
   }
   list.className = "version-list";
   list.innerHTML = versions
     .map(
       (version) => `
-        <div class="version-row">
+        <article class="version-row" data-version-commit="${escapeHtml(version.commit)}" tabindex="0">
           <div>
             <strong>${escapeHtml(version.date)}</strong>
             <p>${escapeHtml(version.subject)} · ${escapeHtml(version.commit.slice(0, 12))}</p>
+            <div class="meta">
+              <span>${Number(version.file_count || 0)} 个文件</span>
+              <span>${formatBytes(version.total_bytes || 0)}</span>
+            </div>
           </div>
-          <a class="button primary compact" href="/api/jobs/${state.selectedJobId}/versions/${version.commit}/download">下载 zip</a>
-        </div>
+          <div class="row-actions">
+            <button class="button secondary compact" data-version-action="browse" data-commit="${escapeHtml(version.commit)}" type="button">查看</button>
+            <a class="button primary compact" data-version-action="download" href="/api/jobs/${state.selectedJobId}/versions/${version.commit}/download">下载 zip</a>
+          </div>
+        </article>
       `,
     )
     .join("");
@@ -377,7 +435,7 @@ function renderRunDialog(run) {
     </div>
     <div class="detail-cell wide">
       <span>备份目录</span>
-      <p>${escapeHtml(job ? job.include_paths.join("\\n") : "未知")}</p>
+      <p>${escapeHtml(job ? job.include_paths.join("\n") : "未知")}</p>
     </div>
     <div class="detail-cell wide">
       <span>目标目录</span>
@@ -390,40 +448,110 @@ function renderRunDialog(run) {
   `;
 }
 
-async function refreshRunDialog() {
-  if (!state.activeRunId) return;
-  await loadRuns();
-  const latest = runById(state.activeRunId);
-  if (!latest) return;
-  renderRunDialog(latest);
-  if (!["running", "paused"].includes(latest.status)) stopRunPolling();
-}
-
-function stopRunPolling() {
-  if (state.runPollTimer) {
-    clearInterval(state.runPollTimer);
-    state.runPollTimer = null;
-  }
-}
-
 function openRunDialog(runId) {
   const run = runById(runId);
   if (!run) return;
   state.activeRunId = runId;
   renderRunDialog(run);
   $("runDialog").showModal();
-  stopRunPolling();
-  if (["running", "paused"].includes(run.status)) {
-    state.runPollTimer = setInterval(() => {
-      refreshRunDialog().catch((error) => toast(`刷新运行详情失败：${error.message}`));
-    }, 3000);
-  }
 }
 
 function closeRunDialog() {
-  stopRunPolling();
   state.activeRunId = null;
   $("runDialog").close();
+}
+
+function renderVersionSummary(detail) {
+  $("versionDialogTitle").textContent = `版本 ${detail.commit.slice(0, 12)}`;
+  $("versionSummary").innerHTML = `
+    <div class="detail-cell">
+      <span>提交时间</span>
+      <strong>${escapeHtml(detail.date)}</strong>
+    </div>
+    <div class="detail-cell">
+      <span>文件数量</span>
+      <strong>${Number(detail.file_count || 0)} 个文件</strong>
+    </div>
+    <div class="detail-cell">
+      <span>版本大小</span>
+      <strong>${formatBytes(detail.total_bytes || 0)}</strong>
+    </div>
+    <div class="detail-cell">
+      <span>提交信息</span>
+      <strong>${escapeHtml(detail.subject)}</strong>
+    </div>
+  `;
+  $("versionDownloadBtn").href = `/api/jobs/${state.selectedJobId}/versions/${detail.commit}/download`;
+}
+
+function renderBreadcrumbs(path) {
+  const parts = path ? path.split("/") : [];
+  const crumbs = [`<button class="crumb" data-version-path="" type="button">snapshot</button>`];
+  parts.forEach((part, index) => {
+    const crumbPath = parts.slice(0, index + 1).join("/");
+    crumbs.push(`<span>/</span><button class="crumb" data-version-path="${escapeHtml(crumbPath)}" type="button">${escapeHtml(part)}</button>`);
+  });
+  $("versionBreadcrumbs").innerHTML = crumbs.join("");
+}
+
+function renderVersionTree(tree) {
+  state.activeVersionPath = tree.path || "";
+  renderBreadcrumbs(state.activeVersionPath);
+  const rows = [];
+  if (tree.parent !== null && tree.parent !== undefined) {
+    rows.push(`
+      <button class="file-row" data-version-path="${escapeHtml(tree.parent)}" type="button">
+        <span class="file-icon">↩</span>
+        <span class="file-name">返回上一级</span>
+        <span class="file-size"></span>
+      </button>
+    `);
+  }
+  if (!tree.entries.length) {
+    rows.push(`<div class="file-empty">这个目录是空的。</div>`);
+  }
+  tree.entries.forEach((entry) => {
+    const isDir = entry.type === "dir";
+    rows.push(`
+      <button class="file-row ${isDir ? "is-dir" : "is-file"}" ${isDir ? `data-version-path="${escapeHtml(entry.path)}"` : "disabled"} type="button">
+        <span class="file-icon">${isDir ? "▸" : "·"}</span>
+        <span class="file-name">${escapeHtml(entry.name)}</span>
+        <span class="file-size">${isDir ? "文件夹" : formatBytes(entry.size || 0)}</span>
+      </button>
+    `);
+  });
+  $("versionTree").className = "file-browser";
+  $("versionTree").innerHTML = rows.join("");
+}
+
+async function loadVersionTree(path = "") {
+  if (!state.activeVersion) return;
+  $("versionTree").className = "file-browser loading-state";
+  $("versionTree").innerHTML = `<span></span><span></span><span></span>`;
+  const tree = await api(
+    `/api/jobs/${state.selectedJobId}/versions/${state.activeVersion.commit}/tree?path=${encodeURIComponent(path)}`,
+  );
+  renderVersionTree(tree);
+}
+
+async function openVersionDialog(commit) {
+  const version = state.versions.find((item) => item.commit === commit) || { commit };
+  state.activeVersion = version;
+  state.activeVersionPath = "";
+  $("versionDialog").showModal();
+  $("versionSummary").innerHTML = `<div class="loading-state"><span></span><span></span></div>`;
+  $("versionTree").className = "file-browser loading-state";
+  $("versionTree").innerHTML = `<span></span><span></span><span></span>`;
+  const detail = await api(`/api/jobs/${state.selectedJobId}/versions/${commit}`);
+  state.activeVersion = detail;
+  renderVersionSummary(detail);
+  await loadVersionTree("");
+}
+
+function closeVersionDialog() {
+  state.activeVersion = null;
+  state.activeVersionPath = "";
+  $("versionDialog").close();
 }
 
 function resetDialog() {
@@ -508,7 +636,7 @@ function validatePayload(payload, isNew) {
 
 async function loadJobs() {
   state.jobs = await api("/api/jobs");
-  if (!state.selectedJobId && state.jobs[0]) state.selectedJobId = state.jobs[0].id;
+  reconcileSelectedJob();
   renderJobs();
   renderVersionJobSelect();
 }
@@ -519,17 +647,46 @@ async function loadRuns() {
     state.runCache[run.id] = run;
   });
   if (state.page === "recent") renderRuns();
+  if (state.activeRunId) {
+    const latest = runById(state.activeRunId);
+    if (latest) renderRunDialog(latest);
+  }
 }
 
 async function loadSelectedVersions() {
   const job = activeJob();
   if (!job) {
-    $("versionsList").className = "version-list empty";
-    $("versionsList").textContent = "暂无任务。";
+    state.versions = [];
+    $("versionCount").textContent = "0 个版本";
+    $("versionsList").className = "version-list empty-state";
+    $("versionsList").innerHTML = `<strong>暂无任务</strong><p>先创建一个备份任务。</p>`;
     return;
   }
-  const versions = await api(`/api/jobs/${job.id}/versions`);
-  renderVersions(versions);
+  state.versions = await api(`/api/jobs/${job.id}/versions`);
+  renderVersions(state.versions);
+}
+
+async function syncAll() {
+  if (state.syncBusy) return;
+  state.syncBusy = true;
+  setLiveStatus("正在同步状态", true);
+  try {
+    await Promise.all([loadJobs(), loadRuns()]);
+    if (state.page === "versions") await loadSelectedVersions();
+    setLiveStatus(`实时同步中 · ${formatClock()}`, false);
+  } catch (error) {
+    setLiveStatus("同步失败，稍后重试", false);
+    if (!document.hidden) toast(`同步失败：${error.message}`);
+  } finally {
+    state.syncBusy = false;
+  }
+}
+
+function startAutoSync() {
+  clearInterval(state.syncTimer);
+  state.syncTimer = setInterval(() => {
+    if (!document.hidden) syncAll();
+  }, 2000);
 }
 
 async function saveJob(event) {
@@ -546,7 +703,7 @@ async function saveJob(event) {
       ? await api(`/api/jobs/${jobId}`, { method: "PATCH", body: JSON.stringify(payload) })
       : await api("/api/jobs", { method: "POST", body: JSON.stringify(payload) });
     state.selectedJobId = saved.id;
-    await Promise.all([loadJobs(), loadRuns()]);
+    await syncAll();
     closeJobDialog();
     toast("任务已保存。");
   } catch (error) {
@@ -585,19 +742,36 @@ async function deleteCurrentJob() {
   const jobId = Number($("jobId").value);
   const job = state.jobs.find((item) => item.id === jobId);
   if (!job) return;
-  const yes = window.confirm(`确定删除任务“${job.name}”吗？本操作不删除备份仓库文件。`);
+  const yes = window.confirm(`确定删除任务“${job.name}”吗？本操作不会删除备份仓库文件。`);
   if (!yes) return;
   await api(`/api/jobs/${jobId}`, { method: "DELETE" });
   if (state.selectedJobId === jobId) state.selectedJobId = state.jobs.find((item) => item.id !== jobId)?.id || null;
-  await Promise.all([loadJobs(), loadRuns()]);
+  await syncAll();
   closeJobDialog();
   toast("任务已删除。");
 }
 
 async function runJob(jobId) {
-  toast("备份已加入后台队列。");
+  const maxRunId = Math.max(0, ...state.runs.map((run) => Number(run.id || 0)));
+  toast("备份已启动，正在跳转到最近任务。");
   await api(`/api/jobs/${jobId}/run`, { method: "POST" });
-  setTimeout(() => loadRuns().catch((error) => toast(`刷新失败：${error.message}`)), 1800);
+  navigateTo("recent", { animate: true });
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await sleep(attempt === 0 ? 450 : 700);
+    await syncAll();
+    const created = state.runs.find((run) => run.job_id === jobId && Number(run.id) > maxRunId);
+    if (created) {
+      state.highlightRunId = created.id;
+      renderRuns();
+      setTimeout(() => {
+        if (state.highlightRunId === created.id) {
+          state.highlightRunId = null;
+          renderRuns();
+        }
+      }, 6000);
+      return;
+    }
+  }
 }
 
 async function testSavedJob(jobId) {
@@ -612,18 +786,19 @@ async function controlRun(runId, action) {
   });
   const messages = {
     pause: "已请求暂停。当前文件完成后会暂停。",
-    resume: "已请求继续。停止或中断任务会从已有文件恢复。",
+    resume: "已请求继续。任务会从已有文件恢复。",
     stop: "已请求结束。当前文件完成后会停止。",
   };
   toast(messages[action] || "操作已提交。");
-  await loadRuns();
+  await syncAll();
 }
 
 async function deleteRun(runId) {
   const yes = window.confirm("确定删除这条执行记录吗？这不会删除备份仓库文件。");
   if (!yes) return;
   await api(`/api/runs/${runId}`, { method: "DELETE" });
-  await loadRuns();
+  if (state.activeRunId === runId) closeRunDialog();
+  await syncAll();
   toast("执行记录已删除。");
 }
 
@@ -631,22 +806,14 @@ function bindEvents() {
   document.querySelectorAll("[data-page-link]").forEach((link) => {
     link.addEventListener("click", (event) => {
       event.preventDefault();
-      const page = link.dataset.pageLink;
-      history.replaceState(null, "", `#${page}`);
-      setPage(page);
+      navigateTo(link.dataset.pageLink, { animate: true });
     });
   });
 
   $("newJobBtn").addEventListener("click", () => openJobDialog());
-  $("refreshBtn").addEventListener("click", async () => {
-    await Promise.all([loadJobs(), loadRuns()]);
-    toast("已刷新。");
-  });
-  $("refreshVersionsBtn").addEventListener("click", () => loadSelectedVersions().catch((error) => toast(`刷新失败：${error.message}`)));
-  $("refreshRecentBtn").addEventListener("click", () => loadRuns().catch((error) => toast(`刷新失败：${error.message}`)));
   $("versionsJobSelect").addEventListener("change", (event) => {
     state.selectedJobId = Number(event.target.value);
-    loadSelectedVersions().catch((error) => toast(`加载失败：${error.message}`));
+    loadSelectedVersions().catch((error) => toast(`加载版本失败：${error.message}`));
   });
 
   $("jobsList").addEventListener("click", (event) => {
@@ -695,6 +862,36 @@ function bindEvents() {
     openRunDialog(Number(row.dataset.runId));
   });
 
+  $("versionsList").addEventListener("click", (event) => {
+    const download = event.target.closest("a[data-version-action='download']");
+    if (download) return;
+    const button = event.target.closest("[data-version-commit], button[data-version-action='browse']");
+    if (!button) return;
+    event.preventDefault();
+    const commit = button.dataset.commit || button.dataset.versionCommit || button.closest("[data-version-commit]")?.dataset.versionCommit;
+    if (commit) openVersionDialog(commit).catch((error) => toast(`打开版本失败：${error.message}`));
+  });
+
+  $("versionsList").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest("[data-version-commit]");
+    if (!row) return;
+    event.preventDefault();
+    openVersionDialog(row.dataset.versionCommit).catch((error) => toast(`打开版本失败：${error.message}`));
+  });
+
+  $("versionTree").addEventListener("click", (event) => {
+    const row = event.target.closest("[data-version-path]");
+    if (!row) return;
+    loadVersionTree(row.dataset.versionPath || "").catch((error) => toast(`读取目录失败：${error.message}`));
+  });
+
+  $("versionBreadcrumbs").addEventListener("click", (event) => {
+    const crumb = event.target.closest("[data-version-path]");
+    if (!crumb) return;
+    loadVersionTree(crumb.dataset.versionPath || "").catch((error) => toast(`读取目录失败：${error.message}`));
+  });
+
   $("jobForm").addEventListener("submit", saveJob);
   $("testConnectionBtn").addEventListener("click", testDialogConnection);
   $("showPassword").addEventListener("change", () => {
@@ -706,19 +903,30 @@ function bindEvents() {
   $("jobDialog").addEventListener("click", (event) => {
     if (event.target === $("jobDialog")) closeJobDialog();
   });
-  $("refreshRunDialogBtn").addEventListener("click", () => refreshRunDialog().catch((error) => toast(`刷新失败：${error.message}`)));
+
   $("closeRunDialogBtn").addEventListener("click", closeRunDialog);
   $("closeRunDialogBottomBtn").addEventListener("click", closeRunDialog);
   $("runDialog").addEventListener("click", (event) => {
     if (event.target === $("runDialog")) closeRunDialog();
   });
+
+  $("closeVersionDialogBtn").addEventListener("click", closeVersionDialog);
+  $("closeVersionDialogBottomBtn").addEventListener("click", closeVersionDialog);
+  $("versionDialog").addEventListener("click", (event) => {
+    if (event.target === $("versionDialog")) closeVersionDialog();
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) syncAll();
+  });
 }
 
 async function init() {
   bindEvents();
-  await Promise.all([loadJobs(), loadRuns()]);
+  await syncAll();
   const hashPage = location.hash.replace("#", "");
   setPage(["dashboard", "versions", "recent"].includes(hashPage) ? hashPage : "dashboard");
+  startAutoSync();
 }
 
 init().catch((error) => toast(`初始化失败：${error.message}`));

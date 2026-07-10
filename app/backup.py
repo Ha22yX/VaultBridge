@@ -762,7 +762,65 @@ def run_backup(job_id: int) -> dict[str, str | int]:
         raise
 
 
-def list_versions(job_id: int) -> list[dict[str, str]]:
+def _safe_commit_ref(commit: str) -> str:
+    safe_commit = "".join(char for char in commit if char.isalnum())[:40]
+    if len(safe_commit) < 7:
+        raise BackupError("Invalid commit")
+    return safe_commit
+
+
+def _normalize_version_path(path: str) -> str:
+    cleaned = (path or "").replace("\\", "/").strip("/")
+    if not cleaned:
+        return ""
+    parts = PurePosixPath(cleaned).parts
+    if any(part in {"", ".", ".."} for part in parts):
+        raise BackupError("Invalid version path")
+    return "/".join(parts)
+
+
+def _snapshot_treeish(commit: str, path: str = "") -> str:
+    safe_commit = _safe_commit_ref(commit)
+    normalized = _normalize_version_path(path)
+    if normalized:
+        return f"{safe_commit}:snapshot/{normalized}"
+    return f"{safe_commit}:snapshot"
+
+
+def _version_snapshot_summary(root: Path, commit: str) -> dict[str, int]:
+    result = _run_git(["ls-tree", "-r", "-l", _safe_commit_ref(commit), "snapshot"], root, check=False)
+    if result.returncode != 0:
+        return {"file_count": 0, "total_bytes": 0}
+    file_count = 0
+    total_bytes = 0
+    for line in result.stdout.splitlines():
+        if "\t" not in line:
+            continue
+        metadata, _path = line.split("\t", 1)
+        fields = metadata.split()
+        if len(fields) < 4 or fields[1] != "blob":
+            continue
+        file_count += 1
+        if fields[3].isdigit():
+            total_bytes += int(fields[3])
+    return {"file_count": file_count, "total_bytes": total_bytes}
+
+
+def _version_log_entry(root: Path, commit: str) -> dict[str, Any]:
+    result = _run_git(
+        ["log", "-1", "--pretty=format:%H%x09%ad%x09%s", "--date=format:%Y-%m-%d %H:%M:%S", _safe_commit_ref(commit)],
+        root,
+    )
+    full_commit, date, subject = result.stdout.strip().split("\t", 2)
+    return {
+        "commit": full_commit,
+        "date": date,
+        "subject": subject,
+        **_version_snapshot_summary(root, full_commit),
+    }
+
+
+def list_versions(job_id: int) -> list[dict[str, Any]]:
     job = repository.get_job(job_id)
     root = repo_root(job)
     if not (root / ".git").exists():
@@ -777,8 +835,52 @@ def list_versions(job_id: int) -> list[dict[str, str]]:
     versions = []
     for line in result.stdout.splitlines():
         commit, date, subject = line.split("\t", 2)
-        versions.append({"commit": commit, "date": date, "subject": subject})
+        versions.append(
+            {
+                "commit": commit,
+                "date": date,
+                "subject": subject,
+                **_version_snapshot_summary(root, commit),
+            }
+        )
     return versions
+
+
+def get_version_detail(job_id: int, commit: str) -> dict[str, Any]:
+    job = repository.get_job(job_id)
+    root = repo_root(job)
+    if not (root / ".git").exists():
+        raise BackupError("No Git repository exists for this job yet")
+    return _version_log_entry(root, commit)
+
+
+def list_version_tree(job_id: int, commit: str, path: str = "") -> dict[str, Any]:
+    job = repository.get_job(job_id)
+    root = repo_root(job)
+    if not (root / ".git").exists():
+        raise BackupError("No Git repository exists for this job yet")
+    normalized = _normalize_version_path(path)
+    result = _run_git(["ls-tree", "-l", _snapshot_treeish(commit, normalized)], root, check=False)
+    if result.returncode != 0:
+        raise BackupError(result.stderr.strip() or "Version path not found")
+    entries = []
+    for line in result.stdout.splitlines():
+        if "\t" not in line:
+            continue
+        metadata, entry_name = line.split("\t", 1)
+        fields = metadata.split()
+        if len(fields) < 4:
+            continue
+        kind = "dir" if fields[1] == "tree" else "file"
+        size = int(fields[3]) if kind == "file" and fields[3].isdigit() else None
+        entry_path = "/".join(part for part in [normalized, entry_name] if part)
+        entries.append({"name": entry_name, "path": entry_path, "type": kind, "size": size})
+    entries.sort(key=lambda item: (item["type"] != "dir", item["name"].lower()))
+    parent = None
+    if normalized:
+        parent_parts = normalized.split("/")[:-1]
+        parent = "/".join(parent_parts) if parent_parts else ""
+    return {"commit": _safe_commit_ref(commit), "path": normalized, "parent": parent, "entries": entries}
 
 
 def create_archive(job_id: int, commit: str) -> Path:
@@ -786,9 +888,7 @@ def create_archive(job_id: int, commit: str) -> Path:
     root = repo_root(job)
     if not (root / ".git").exists():
         raise BackupError("No Git repository exists for this job yet")
-    safe_commit = "".join(char for char in commit if char.isalnum())[:40]
-    if len(safe_commit) < 7:
-        raise BackupError("Invalid commit")
+    safe_commit = _safe_commit_ref(commit)
     archives = archives_root(job)
     archives.mkdir(parents=True, exist_ok=True)
     output = archives / f"vaultbridge-{safe_commit[:12]}.zip"

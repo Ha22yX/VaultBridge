@@ -42,7 +42,6 @@
                 <p class="subtitle">管理服务器到 NAS 的自动备份配置。点击任务行可编辑 SSH、目录和计划。</p>
               </div>
               <div class="top-actions">
-                <button id="refreshBtn" class="button secondary" type="button">刷新</button>
                 <button id="newJobBtn" class="button primary" type="button">新建任务</button>
               </div>
             </header>
@@ -64,9 +63,8 @@
               <div>
                 <p class="eyebrow">Versions</p>
                 <h1>版本记录</h1>
-                <p class="subtitle">选择一个备份任务，查看 Git 历史版本并下载任意时间点的 zip。</p>
+                <p class="subtitle">选择一个备份任务，查看 Git 历史版本、版本大小，并像浏览文件夹一样查看任意版本。</p>
               </div>
-              <button id="refreshVersionsBtn" class="button secondary" type="button">刷新版本</button>
             </header>
 
             <section class="version-toolbar">
@@ -82,6 +80,7 @@
                   <p class="eyebrow">Commits</p>
                   <h2>备份版本</h2>
                 </div>
+                <span id="versionCount" class="badge">0 个版本</span>
               </div>
               <div id="versionsList" class="version-list empty">选择任务后查看版本。</div>
             </article>
@@ -92,9 +91,9 @@
               <div>
                 <p class="eyebrow">Recent tasks</p>
                 <h1>最近任务</h1>
-                <p class="subtitle">查看所有备份执行记录，并对运行中的任务执行暂停、继续、结束或删除。</p>
+                <p class="subtitle">实时查看所有备份执行记录，并对运行中的任务执行暂停、继续、结束或删除。</p>
               </div>
-              <button id="refreshRecentBtn" class="button secondary" type="button">刷新任务</button>
+              <span id="liveStatus" class="live-status">实时同步中</span>
             </header>
 
             <article class="panel">
@@ -235,9 +234,30 @@
         <div id="runDetailBody" class="run-detail-body"></div>
 
         <div class="dialog-actions">
-          <button id="refreshRunDialogBtn" class="button secondary" type="button">刷新详情</button>
           <span class="dialog-spacer"></span>
           <button id="closeRunDialogBottomBtn" class="button primary" type="button">关闭</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="versionDialog" class="job-dialog version-dialog">
+      <div class="dialog-card">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">Version detail</p>
+            <h2 id="versionDialogTitle">版本详情</h2>
+          </div>
+          <button id="closeVersionDialogBtn" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+
+        <div id="versionSummary" class="version-summary"></div>
+        <div id="versionBreadcrumbs" class="breadcrumbs"></div>
+        <div id="versionTree" class="file-browser empty">正在读取版本文件。</div>
+
+        <div class="dialog-actions">
+          <a id="versionDownloadBtn" class="button secondary" href="#">下载 zip</a>
+          <span class="dialog-spacer"></span>
+          <button id="closeVersionDialogBottomBtn" class="button primary" type="button">关闭</button>
         </div>
       </div>
     </dialog>

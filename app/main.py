@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import repository
-from .backup import create_archive, list_versions, run_backup
+from .backup import create_archive, get_version_detail, list_version_tree, list_versions, run_backup
 from .db import init_db
 from .schemas import BrowseIn, ConnectionIn, JobIn, JobPatch, RunControlIn
 from .scheduler import reload_jobs, start_scheduler, stop_scheduler
@@ -148,11 +148,31 @@ def api_run_now(job_id: int, background_tasks: BackgroundTasks) -> dict[str, str
 
 
 @app.get("/api/jobs/{job_id}/versions")
-def api_versions(job_id: int) -> list[dict[str, str]]:
+def api_versions(job_id: int) -> list[dict]:
     try:
         return list_versions(job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/{job_id}/versions/{commit}")
+def api_version_detail(job_id: int, commit: str) -> dict:
+    try:
+        return get_version_detail(job_id, commit)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/jobs/{job_id}/versions/{commit}/tree")
+def api_version_tree(job_id: int, commit: str, path: str = Query(default="")) -> dict:
+    try:
+        return list_version_tree(job_id, commit, path)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/jobs/{job_id}/versions/{commit}/download")
