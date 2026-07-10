@@ -364,7 +364,6 @@ def run_rsync_tree(
         "--partial",
         "--partial-dir=.rsync-partial",
         "--timeout=180",
-        "--contimeout=30",
         "--no-motd",
         "--info=progress2,stats2",
         "--out-format=VB_FILE:%n|%l",
