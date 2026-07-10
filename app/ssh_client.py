@@ -4,7 +4,6 @@ import fnmatch
 import os
 import posixpath
 import shlex
-import shutil
 import socket
 import stat
 import tarfile
@@ -224,6 +223,8 @@ def stream_tar_tree(
     exclude_patterns: list[str],
     *,
     progress_callback: Callable[[str, int], None] | None = None,
+    file_start_callback: Callable[[str, int], None] | None = None,
+    chunk_callback: Callable[[str, int], None] | None = None,
     control_callback: Callable[[], None] | None = None,
     seen_local_paths: set[Path] | None = None,
 ) -> tuple[int, int]:
@@ -241,6 +242,7 @@ def stream_tar_tree(
     files = 0
     bytes_seen = 0
     channel = stdout.channel
+    channel.settimeout(90)
     try:
         with tarfile.open(fileobj=stdout, mode="r|*") as archive:
             for member in archive:
@@ -272,6 +274,10 @@ def stream_tar_tree(
                 if seen_local_paths is not None:
                     seen_local_paths.add(target.resolve())
 
+                display_path = normalized + "/" + relative_to_root if relative_to_root else normalized
+                if file_start_callback:
+                    file_start_callback(display_path, size)
+
                 should_write = True
                 if target.exists() and target.is_file():
                     stat_result = target.stat()
@@ -281,18 +287,46 @@ def stream_tar_tree(
 
                 source = archive.extractfile(member)
                 if source is not None:
+                    remaining = size
                     if should_write:
                         with target.open("wb") as handle:
-                            shutil.copyfileobj(source, handle, length=1024 * 1024)
+                            while remaining > 0:
+                                if control_callback:
+                                    control_callback()
+                                chunk = source.read(min(1024 * 1024, remaining))
+                                if not chunk:
+                                    break
+                                handle.write(chunk)
+                                remaining -= len(chunk)
+                                bytes_seen += len(chunk)
+                                if chunk_callback:
+                                    chunk_callback(display_path, len(chunk))
                         os.utime(target, (int(member.mtime), int(member.mtime)))
                     else:
                         with open(os.devnull, "wb") as devnull:
-                            shutil.copyfileobj(source, devnull, length=1024 * 1024)
+                            while remaining > 0:
+                                if control_callback:
+                                    control_callback()
+                                chunk = source.read(min(1024 * 1024, remaining))
+                                if not chunk:
+                                    break
+                                devnull.write(chunk)
+                                remaining -= len(chunk)
+                                bytes_seen += len(chunk)
+                                if chunk_callback:
+                                    chunk_callback(display_path, len(chunk))
+                    if remaining > 0:
+                        raise RemoteTarError(f"Remote tar ended before {display_path} was fully received.")
 
                 files += 1
-                bytes_seen += size
                 if progress_callback:
-                    progress_callback(normalized + "/" + relative_to_root if relative_to_root else normalized, size)
+                    progress_callback(display_path, 0)
+    except socket.timeout as exc:
+        channel.close()
+        raise RemoteTarError(
+            "Remote tar stream did not send data for 90 seconds. "
+            "The server disk, network, or current file may be stalled."
+        ) from exc
     except tarfile.TarError as exc:
         channel.close()
         error_text = stderr.read().decode("utf-8", errors="replace").strip()

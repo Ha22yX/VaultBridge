@@ -125,6 +125,35 @@ class RunProgress:
             copied_bytes=self.copied_bytes,
         )
 
+    def start_file(self, path: str, size: int) -> None:
+        self.check_control()
+        self.current_path = path
+        if self.total_files:
+            message = f"Receiving {self.copied_files + 1}/{self.total_files}: {path}"
+        else:
+            message = f"Receiving file: {path}"
+        self.update(
+            force=True,
+            phase="syncing",
+            message=message,
+            current_path=path,
+        )
+
+    def copied_chunk(self, path: str, size: int) -> None:
+        self.current_path = path
+        self.copied_bytes += size
+        if self.total_files:
+            message = f"Receiving {self.copied_files + 1}/{self.total_files} files."
+        else:
+            message = f"Received {self.copied_files} files."
+        self.update(
+            phase="syncing",
+            message=message,
+            current_path=path,
+            copied_files=self.copied_files,
+            copied_bytes=self.copied_bytes,
+        )
+
     def flush_copy(self) -> None:
         if self.total_files:
             message = f"Received {self.copied_files}/{self.total_files} files."
@@ -271,6 +300,8 @@ def _run_tar_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress, 
                 snapshot,
                 job["exclude_patterns"],
                 progress_callback=progress.copied_file,
+                file_start_callback=progress.start_file,
+                chunk_callback=progress.copied_chunk,
                 control_callback=progress.check_control,
                 seen_local_paths=seen_paths,
             )
