@@ -19,6 +19,7 @@
   --shadow-float: 0 30px 90px rgba(24, 34, 29, 0.2);
   --radius: 8px;
   --radius-lg: 12px;
+  --layout-max: 1840px;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -89,12 +90,12 @@ select {
 
 .shell {
   display: grid;
-  grid-template-columns: 224px minmax(0, 1fr);
-  gap: 18px;
-  width: min(1500px, 100%);
+  grid-template-columns: 244px minmax(0, 1fr);
+  gap: 24px;
+  width: min(var(--layout-max), calc(100vw - 48px));
   min-height: 100dvh;
   margin: 0 auto;
-  padding: 18px;
+  padding: 24px 0;
 }
 
 .sidebar {
@@ -218,12 +219,12 @@ select {
 
 main {
   min-width: 0;
-  padding: 20px 20px 54px;
+  padding: 24px 0 64px;
 }
 
 .workspace {
-  width: min(1180px, 100%);
-  margin: 0 auto;
+  width: 100%;
+  min-width: 0;
 }
 
 .page {
@@ -232,11 +233,10 @@ main {
 
 .active-page {
   display: block;
-  animation: pageIn 620ms var(--ease-spring) both;
 }
 
-.route-glide .active-page {
-  animation: pageGlide 620ms var(--ease-spring) both;
+.page.is-entering {
+  animation: pageEnter 280ms var(--ease-out) both;
 }
 
 .topbar {
@@ -953,25 +953,14 @@ small {
   animation: toastIn 420ms var(--ease-spring) both;
 }
 
-@keyframes pageIn {
+@keyframes pageEnter {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes pageGlide {
-  from {
-    opacity: 0;
-    transform: translateX(18px) scale(0.992);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) scale(1);
   }
 }
 
@@ -1042,6 +1031,8 @@ small {
 @media (max-width: 1180px) {
   .shell {
     grid-template-columns: 1fr;
+    width: min(100%, calc(100vw - 20px));
+    padding: 10px 0;
   }
 
   .sidebar {
@@ -1062,10 +1053,14 @@ small {
 
 @media (max-width: 820px) {
   .shell {
+    width: 100%;
     padding: 10px;
   }
 
-  main,
+  main {
+    padding: 0 0 48px;
+  }
+
   .sidebar {
     padding: 16px;
   }

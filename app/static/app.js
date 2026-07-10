@@ -187,14 +187,27 @@ function reconcileSelectedJob() {
 }
 
 function setPage(page, options = {}) {
+  const previousPage = state.page;
+  const shouldAnimate = Boolean(options.animate) && previousPage !== page;
   state.page = page;
-  document.body.classList.toggle("route-glide", Boolean(options.animate));
-  clearTimeout(window.__routeAnimationTimer);
-  window.__routeAnimationTimer = setTimeout(() => document.body.classList.remove("route-glide"), 520);
 
-  $("dashboardPage").classList.toggle("active-page", page === "dashboard");
-  $("versionsPage").classList.toggle("active-page", page === "versions");
-  $("recentPage").classList.toggle("active-page", page === "recent");
+  const pageNodes = {
+    dashboard: $("dashboardPage"),
+    versions: $("versionsPage"),
+    recent: $("recentPage"),
+  };
+  Object.entries(pageNodes).forEach(([pageName, node]) => {
+    node.classList.toggle("active-page", page === pageName);
+    node.classList.remove("is-entering");
+  });
+  if (shouldAnimate && pageNodes[page]) {
+    requestAnimationFrame(() => {
+      if (state.page === page) pageNodes[page].classList.add("is-entering");
+    });
+    clearTimeout(window.__routeAnimationTimer);
+    window.__routeAnimationTimer = setTimeout(() => pageNodes[page].classList.remove("is-entering"), 320);
+  }
+
   document.querySelectorAll("[data-page-link]").forEach((link) => {
     link.classList.toggle("active", link.dataset.pageLink === page);
   });
