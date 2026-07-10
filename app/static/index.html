@@ -214,6 +214,36 @@
       </form>
     </dialog>
 
+    <dialog id="runDialog" class="job-dialog run-dialog">
+      <div class="dialog-card">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">Run detail</p>
+            <h2 id="runDialogTitle">运行详情</h2>
+          </div>
+          <button id="closeRunDialogBtn" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+
+        <div class="run-progress-block">
+          <div class="run-progress-head">
+            <span id="runStatusBadge" class="badge">等待中</span>
+            <strong id="runProgressText">准备读取状态</strong>
+          </div>
+          <div class="progress-track" aria-hidden="true">
+            <div id="runProgressBar" class="progress-bar"></div>
+          </div>
+        </div>
+
+        <div id="runDetailBody" class="run-detail-body"></div>
+
+        <div class="dialog-actions">
+          <button id="refreshRunDialogBtn" class="button secondary" type="button">刷新详情</button>
+          <span class="dialog-spacer"></span>
+          <button id="closeRunDialogBottomBtn" class="button primary" type="button">关闭</button>
+        </div>
+      </div>
+    </dialog>
+
     <div id="toast" class="toast" hidden></div>
     <script src="/static/app.js"></script>
   </body>

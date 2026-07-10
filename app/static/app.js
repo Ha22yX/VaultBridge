@@ -3,6 +3,9 @@ const state = {
   runs: [],
   selectedJobId: null,
   page: "dashboard",
+  activeRunId: null,
+  runPollTimer: null,
+  runCache: {},
 };
 
 const $ = (id) => document.getElementById(id);
@@ -140,11 +143,14 @@ function renderRuns(targetId = "runsList", runs = state.runs) {
     return;
   }
   list.className = "timeline";
+  runs.forEach((run) => {
+    state.runCache[run.id] = run;
+  });
   list.innerHTML = runs
     .map(
       (run) => `
-        <div class="run-row">
-          <strong>${escapeHtml(run.status)} · ${escapeHtml(jobName(run.job_id))}</strong>
+        <div class="run-row" data-run-id="${run.id}" tabindex="0">
+          <strong>${escapeHtml(statusLabel(run.status))} · ${escapeHtml(jobName(run.job_id))}</strong>
           <p>${escapeHtml(run.started_at || "")}${run.finished_at ? ` 至 ${escapeHtml(run.finished_at)}` : ""}</p>
           <p>${escapeHtml(run.message || "无消息")}</p>
           <p>${escapeHtml(run.commit_hash ? `提交 ${run.commit_hash.slice(0, 12)}` : "无提交")}</p>
@@ -152,6 +158,126 @@ function renderRuns(targetId = "runsList", runs = state.runs) {
       `,
     )
     .join("");
+}
+
+function statusLabel(status) {
+  const labels = {
+    running: "运行中",
+    success: "已完成",
+    failed: "失败",
+    queued: "排队中",
+  };
+  return labels[status] || status || "未知";
+}
+
+function progressForStatus(status) {
+  if (status === "success") return { percent: 100, text: "备份完成", failed: false };
+  if (status === "failed") return { percent: 100, text: "备份失败", failed: true };
+  if (status === "running") return { percent: 58, text: "正在连接服务器并同步文件", failed: false };
+  if (status === "queued") return { percent: 15, text: "等待后台任务开始", failed: false };
+  return { percent: 25, text: "正在读取状态", failed: false };
+}
+
+function runById(runId) {
+  return state.runs.find((run) => run.id === runId) || state.runCache[runId];
+}
+
+function jobById(jobId) {
+  return state.jobs.find((job) => job.id === jobId);
+}
+
+function renderRunDialog(run) {
+  const job = jobById(run.job_id);
+  const progress = progressForStatus(run.status);
+  $("runDialogTitle").textContent = `${job ? job.name : `任务 #${run.job_id}`} · ${statusLabel(run.status)}`;
+  $("runStatusBadge").textContent = statusLabel(run.status);
+  $("runProgressText").textContent = progress.text;
+  $("runProgressBar").style.width = `${progress.percent}%`;
+  $("runProgressBar").classList.toggle("failed", progress.failed);
+  $("runDetailBody").innerHTML = `
+    <div class="detail-cell">
+      <span>任务名称</span>
+      <strong>${escapeHtml(job ? job.name : `任务 #${run.job_id}`)}</strong>
+    </div>
+    <div class="detail-cell">
+      <span>运行状态</span>
+      <strong>${escapeHtml(statusLabel(run.status))}</strong>
+    </div>
+    <div class="detail-cell">
+      <span>开始时间</span>
+      <strong>${escapeHtml(run.started_at || "未记录")}</strong>
+    </div>
+    <div class="detail-cell">
+      <span>结束时间</span>
+      <strong>${escapeHtml(run.finished_at || "尚未结束")}</strong>
+    </div>
+    <div class="detail-cell">
+      <span>提交版本</span>
+      <strong>${escapeHtml(run.commit_hash || "暂无提交")}</strong>
+    </div>
+    <div class="detail-cell">
+      <span>计划时间</span>
+      <strong>${escapeHtml(job ? formatSchedule(job) : "未知")}</strong>
+    </div>
+    <div class="detail-cell wide">
+      <span>备份目录</span>
+      <p>${escapeHtml(job ? job.include_paths.join("\\n") : "未知")}</p>
+    </div>
+    <div class="detail-cell wide">
+      <span>目标目录</span>
+      <p>${escapeHtml(job ? job.target_path : "未知")}</p>
+    </div>
+    <div class="detail-cell wide">
+      <span>运行消息</span>
+      <p>${escapeHtml(run.message || "暂无消息")}</p>
+    </div>
+  `;
+}
+
+async function refreshRunDialog() {
+  if (!state.activeRunId) return;
+  const current = runById(state.activeRunId);
+  if (!current) return;
+  const latestRuns = await api(`/api/runs?job_id=${current.job_id}`);
+  const latest = latestRuns.find((run) => run.id === state.activeRunId);
+  if (!latest) return;
+  state.runCache[latest.id] = latest;
+  state.runs = state.runs.map((run) => (run.id === latest.id ? latest : run));
+  renderRunDialog(latest);
+  renderRuns();
+  if (state.page === "versions") {
+    renderRuns("versionRunsList", latestRuns);
+  }
+  if (latest.status !== "running") {
+    stopRunPolling();
+  }
+}
+
+function stopRunPolling() {
+  if (state.runPollTimer) {
+    clearInterval(state.runPollTimer);
+    state.runPollTimer = null;
+  }
+}
+
+function openRunDialog(runId) {
+  const run = runById(runId);
+  if (!run) return;
+  state.activeRunId = runId;
+  renderRunDialog(run);
+  $("runDialog").showModal();
+  stopRunPolling();
+  if (run.status === "running") {
+    state.runPollTimer = setInterval(() => {
+      refreshRunDialog().catch((error) => toast(`刷新运行详情失败：${error.message}`));
+    }, 3000);
+  }
+}
+
+function closeRunDialog() {
+  stopRunPolling();
+  state.activeRunId = null;
+  $("runDialog").close();
 }
 
 function renderVersionJobSelect() {
@@ -425,6 +551,21 @@ function bindEvents() {
     openJobById(Number(row.dataset.openJob)).catch((error) => toast(`打开失败：${error.message}`));
   });
 
+  ["runsList", "versionRunsList"].forEach((listId) => {
+    $(listId).addEventListener("click", (event) => {
+      const row = event.target.closest("[data-run-id]");
+      if (!row) return;
+      openRunDialog(Number(row.dataset.runId));
+    });
+    $(listId).addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const row = event.target.closest("[data-run-id]");
+      if (!row) return;
+      event.preventDefault();
+      openRunDialog(Number(row.dataset.runId));
+    });
+  });
+
   $("jobForm").addEventListener("submit", saveJob);
   $("testConnectionBtn").addEventListener("click", testDialogConnection);
   $("showPassword").addEventListener("change", () => {
@@ -435,6 +576,12 @@ function bindEvents() {
   $("cancelDialogBtn").addEventListener("click", closeJobDialog);
   $("jobDialog").addEventListener("click", (event) => {
     if (event.target === $("jobDialog")) closeJobDialog();
+  });
+  $("refreshRunDialogBtn").addEventListener("click", () => refreshRunDialog().catch((error) => toast(`刷新失败：${error.message}`)));
+  $("closeRunDialogBtn").addEventListener("click", closeRunDialog);
+  $("closeRunDialogBottomBtn").addEventListener("click", closeRunDialog);
+  $("runDialog").addEventListener("click", (event) => {
+    if (event.target === $("runDialog")) closeRunDialog();
   });
 }
 
