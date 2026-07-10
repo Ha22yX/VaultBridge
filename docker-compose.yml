@@ -4,6 +4,7 @@ services:
     image: vaultbridge:latest
     container_name: vaultbridge
     restart: unless-stopped
+    user: "${PUID:-0}:${PGID:-0}"
     ports:
       - "8728:8728"
     environment:
