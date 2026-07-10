@@ -12,6 +12,15 @@ DEFAULT_EXCLUDES = [
     "*.log",
     "tmp",
     ".DS_Store",
+    "*.tar",
+    "*.tar.gz",
+    "*.tgz",
+    "*.zip",
+    "*.7z",
+    "*.rar",
+    "*.bak",
+    "*.dump",
+    "*.sql.gz",
 ]
 
 

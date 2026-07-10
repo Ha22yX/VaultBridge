@@ -91,4 +91,4 @@ Only `repository/snapshot` is versioned. The source server is never modified.
 
 ## Notes
 
-Git is convenient for website files, templates, and uploads that change incrementally. Very large binary media, caches, and generated folders can still make a repository heavy, so VaultBridge includes default excludes such as `.git`, `node_modules`, cache, and log folders.
+Git is convenient for website files, templates, and uploads that change incrementally. Very large binary media, caches, and generated folders can still make a repository heavy, so VaultBridge includes default excludes such as `.git`, `node_modules`, cache, log folders, and common archive/backup files like `.tar.gz`, `.zip`, `.7z`, and `.bak`.

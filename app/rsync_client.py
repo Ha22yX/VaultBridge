@@ -37,6 +37,7 @@ class RsyncTools:
 @dataclass
 class RsyncProgress:
     current_path: str = ""
+    current_file_size: int = 0
     transferred_bytes: int = 0
     checked_files: int = 0
     total_files: int = 0
@@ -177,7 +178,8 @@ def parse_rsync_progress(line: str, current_path: str = "") -> RsyncProgress | N
     cleaned = line.strip()
     file_match = FILE_RE.match(cleaned)
     if file_match:
-        return RsyncProgress(current_path=file_match.group("path"), message=cleaned)
+        size = int(file_match.group("size") or 0)
+        return RsyncProgress(current_path=file_match.group("path"), current_file_size=size, message=cleaned)
 
     match = PROGRESS_RE.search(cleaned)
     if not match:
@@ -361,6 +363,10 @@ def run_rsync_tree(
         "-a",
         "--delete",
         "--whole-file",
+        "--no-perms",
+        "--no-owner",
+        "--no-group",
+        "--omit-dir-times",
         "--partial",
         "--partial-dir=.rsync-partial",
         "--timeout=180",

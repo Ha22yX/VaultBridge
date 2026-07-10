@@ -29,6 +29,30 @@ class BackupStopped(RuntimeError):
     pass
 
 
+PERFORMANCE_EXCLUDES = [
+    "*.tar",
+    "*.tar.gz",
+    "*.tgz",
+    "*.zip",
+    "*.7z",
+    "*.rar",
+    "*.bak",
+    "*.dump",
+    "*.sql.gz",
+]
+
+
+def effective_excludes(job: dict[str, Any]) -> list[str]:
+    patterns: list[str] = []
+    seen: set[str] = set()
+    for pattern in [*job["exclude_patterns"], *PERFORMANCE_EXCLUDES]:
+        cleaned = str(pattern).strip()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            patterns.append(cleaned)
+    return patterns
+
+
 class RunProgress:
     def __init__(self, run_id: int) -> None:
         self.run_id = run_id
@@ -230,6 +254,7 @@ def cleanup_rsync_partials(root: Path) -> None:
 def _run_sftp_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress, run_id: int) -> tuple[int, int]:
     files = 0
     bytes_written = 0
+    exclude_patterns = effective_excludes(job)
     ssh, sftp = connect_sftp(job["host"], job["port"], job["username"], job["password"])
     try:
         repository.update_run_progress(run_id, phase="scanning", message="Scanning remote files with SFTP")
@@ -237,7 +262,7 @@ def _run_sftp_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress,
             count_tree(
                 sftp,
                 remote,
-                job["exclude_patterns"],
+                exclude_patterns,
                 progress_callback=progress.scan_path,
             )
         progress.finish_scan()
@@ -258,7 +283,7 @@ def _run_sftp_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress,
                 sftp,
                 remote,
                 destination,
-                job["exclude_patterns"],
+                exclude_patterns,
                 progress_callback=progress.copied_file,
                 seen_local_paths=seen_paths,
             )
@@ -278,10 +303,11 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
 
     files = 0
     bytes_written = 0
+    exclude_patterns = effective_excludes(job)
     repository.update_run_progress(
         run_id,
         phase="rsyncing",
-        message="Starting rsync incremental sync. Only changed files will be transferred.",
+        message="Starting rsync incremental sync. Large archive files are skipped by default.",
         total_files=0,
         copied_files=0,
         total_bytes=0,
@@ -301,6 +327,8 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
                 f"rsync incremental sync: checked {event.checked_files}/{event.total_files} items, "
                 f"transferred {event.transferred_files} changed files."
             )
+        elif event.current_file_size:
+            message = f"rsync checking file: {event.current_path} ({event.current_file_size} bytes)."
         else:
             message = f"rsync incremental sync: {event.current_path}"
         progress.update(
@@ -322,7 +350,7 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
             password=job["password"],
             remote_path=remote,
             destination=destination,
-            exclude_patterns=job["exclude_patterns"],
+            exclude_patterns=exclude_patterns,
             progress_callback=handle_rsync,
             control_callback=progress.check_control,
         )
@@ -344,6 +372,7 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
 def _run_tar_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress, run_id: int) -> tuple[int, int]:
     files = 0
     bytes_written = 0
+    exclude_patterns = effective_excludes(job)
     ssh = connect_ssh(job["host"], job["port"], job["username"], job["password"])
     try:
         repository.update_run_progress(
@@ -357,7 +386,7 @@ def _run_tar_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress, 
         )
         for remote in job["include_paths"]:
             progress.estimate_path(remote)
-            estimate = estimate_tree_via_ssh(ssh, remote, job["exclude_patterns"])
+            estimate = estimate_tree_via_ssh(ssh, remote, exclude_patterns)
             if estimate:
                 progress.add_estimate(remote, estimate[0], estimate[1])
 
@@ -377,7 +406,7 @@ def _run_tar_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress, 
                 ssh,
                 remote,
                 snapshot,
-                job["exclude_patterns"],
+                exclude_patterns,
                 progress_callback=progress.copied_file,
                 file_start_callback=progress.start_file,
                 chunk_callback=progress.copied_chunk,

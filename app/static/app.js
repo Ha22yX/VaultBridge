@@ -13,7 +13,25 @@ const $ = (id) => document.getElementById(id);
 const defaults = {
   targetPath: "/storage/Files/服务器备份/147.189.128.208",
   includePath: "/www/wwwroot",
-  excludePatterns: [".git", "node_modules", ".cache", "cache", "logs", "*.log", "tmp", ".DS_Store"],
+  excludePatterns: [
+    ".git",
+    "node_modules",
+    ".cache",
+    "cache",
+    "logs",
+    "*.log",
+    "tmp",
+    ".DS_Store",
+    "*.tar",
+    "*.tar.gz",
+    "*.tgz",
+    "*.zip",
+    "*.7z",
+    "*.rar",
+    "*.bak",
+    "*.dump",
+    "*.sql.gz",
+  ],
 };
 
 function toast(message) {

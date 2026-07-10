@@ -8,6 +8,7 @@ def test_parse_rsync_file_line() -> None:
 
     assert progress is not None
     assert progress.current_path == "www/wwwroot/index.php"
+    assert progress.current_file_size == 128
 
 
 def test_parse_rsync_progress_line() -> None:
