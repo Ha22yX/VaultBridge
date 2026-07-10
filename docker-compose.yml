@@ -1,6 +1,7 @@
 services:
   vaultbridge:
     build: .
+    image: vaultbridge:latest
     container_name: vaultbridge
     restart: unless-stopped
     ports:
@@ -9,10 +10,10 @@ services:
       VAULTBRIDGE_HOST: 0.0.0.0
       VAULTBRIDGE_PORT: 8728
       VAULTBRIDGE_DATA_DIR: /app/data
+      TZ: Asia/Shanghai
       # Set this once in production. Do not commit real keys.
       BACKUP_SECRET_KEY: ${BACKUP_SECRET_KEY:-}
     volumes:
       - ./data:/app/data
       # On the NAS, this maps the real backup folder into the container.
-      - /storage/Files/服务器备份/147.189.128.208:/storage/Files/服务器备份/147.189.128.208
-
+      - /tmp/zfsv3/sata11/13515273888/data/Files/服务器备份:/服务器备份

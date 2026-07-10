@@ -50,10 +50,10 @@ The Docker image installs `rsync`, `sshpass`, `openssh-client`, and `git`, so pa
 The compose file maps:
 
 ```text
-/storage/Files/服务器备份/147.189.128.208
+/tmp/zfsv3/sata11/13515273888/data/Files/服务器备份
 ```
 
-into the container, matching the intended NAS folder.
+into the container as `/服务器备份`.
 
 If your NAS has systemd and Python available, you can also install it as a service:
 
@@ -68,7 +68,7 @@ Copy the project folder to `/opt/vaultbridge` first, or adjust `APP_DIR` to the 
 - Source host: your server IP
 - Source user: `root` or a read-only SSH user if you create one later
 - Source folder: `/www/wwwroot`
-- Backup folder: `/storage/Files/服务器备份/147.189.128.208`
+- Backup folder: `/服务器备份/147.189.128.208`
 - Schedule: daily or weekly at the time you prefer
 
 Do not commit real SSH passwords, panel API keys, or server secrets to GitHub. Configure them only through the web panel or local `.env`.
