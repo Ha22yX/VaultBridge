@@ -842,7 +842,7 @@ small {
   display: grid;
   align-content: start;
   gap: 8px;
-  min-height: var(--tree-lock-height, clamp(220px, 34dvh, 360px));
+  min-height: clamp(180px, 24dvh, 320px);
   max-height: min(52dvh, 520px);
   overflow: auto;
   border: 1px solid var(--line);
@@ -850,9 +850,15 @@ small {
   background: rgba(247, 249, 245, 0.82);
   padding: 10px;
   transition:
+    height 360ms var(--ease-spring),
     background 360ms var(--ease-out),
     border-color 360ms var(--ease-out),
     box-shadow 360ms var(--ease-out);
+}
+
+.file-browser.is-resizing {
+  overflow: hidden;
+  will-change: height;
 }
 
 .file-browser.is-switching {
@@ -1154,7 +1160,7 @@ small {
   }
 
   .file-browser {
-    min-height: var(--tree-lock-height, 240px);
+    min-height: 220px;
   }
 
   .file-size {

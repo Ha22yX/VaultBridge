@@ -513,16 +513,49 @@ function treeRowMotion(index) {
   return `style="--row-index: ${Math.min(index, 12)}" data-tree-animated="true"`;
 }
 
+function animateHeightChange(node, update, duration = 360) {
+  if (!node) {
+    update();
+    return;
+  }
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  const startHeight = node.offsetHeight;
+  node.style.height = `${startHeight}px`;
+  node.classList.add("is-resizing");
+
+  update();
+  node.classList.add("is-resizing");
+
+  node.style.height = "auto";
+  const targetHeight = node.offsetHeight;
+  node.style.height = `${startHeight}px`;
+  node.offsetHeight;
+
+  clearTimeout(node.__heightAnimationTimer);
+  if (reduceMotion || Math.abs(targetHeight - startHeight) < 1) {
+    node.style.removeProperty("height");
+    node.classList.remove("is-resizing");
+    return;
+  }
+
+  requestAnimationFrame(() => {
+    node.style.height = `${targetHeight}px`;
+  });
+
+  node.__heightAnimationTimer = setTimeout(() => {
+    node.style.removeProperty("height");
+    node.classList.remove("is-resizing");
+  }, duration);
+}
+
 function setVersionTreeLoading(nextPath) {
   const treeNode = $("versionTree");
-  const currentHeight = treeNode.offsetHeight;
-  if (currentHeight > 0) {
-    treeNode.style.setProperty("--tree-lock-height", `${Math.min(currentHeight, Math.round(window.innerHeight * 0.52))}px`);
-  }
-  renderBreadcrumbs(nextPath);
-  treeNode.setAttribute("aria-busy", "true");
-  treeNode.className = "file-browser loading-state is-switching";
-  treeNode.innerHTML = `<span></span><span></span><span></span>`;
+  animateHeightChange(treeNode, () => {
+    renderBreadcrumbs(nextPath);
+    treeNode.setAttribute("aria-busy", "true");
+    treeNode.className = "file-browser loading-state is-switching";
+    treeNode.innerHTML = `<span></span><span></span><span></span>`;
+  }, 300);
 }
 
 function renderVersionTree(tree) {
@@ -552,13 +585,11 @@ function renderVersionTree(tree) {
     `);
   });
   const treeNode = $("versionTree");
-  treeNode.className = "file-browser is-settled";
-  treeNode.removeAttribute("aria-busy");
-  treeNode.innerHTML = rows.join("");
-  clearTimeout(window.__versionTreeHeightTimer);
-  window.__versionTreeHeightTimer = setTimeout(() => {
-    treeNode.style.removeProperty("--tree-lock-height");
-  }, 360);
+  animateHeightChange(treeNode, () => {
+    treeNode.className = "file-browser is-settled";
+    treeNode.removeAttribute("aria-busy");
+    treeNode.innerHTML = rows.join("");
+  });
 }
 
 async function loadVersionTree(path = "") {
