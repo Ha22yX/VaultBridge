@@ -16,5 +16,5 @@ services:
       BACKUP_SECRET_KEY: ${BACKUP_SECRET_KEY:-}
     volumes:
       - ./data:/app/data
-      # On the NAS, this maps the real backup folder into the container.
-      - /tmp/zfsv3/sata11/13515273888/data/Files/服务器备份:/服务器备份
+      # Set VAULTBRIDGE_BACKUP_HOST_DIR in .env to your real NAS backup folder.
+      - ${VAULTBRIDGE_BACKUP_HOST_DIR:-./backups}:/server-backups

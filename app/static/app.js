@@ -11,7 +11,7 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 const defaults = {
-  targetPath: "/storage/Files/\u670d\u52a1\u5668\u5907\u4efd/147.189.128.208",
+  targetPath: "/server-backups/example-site",
   includePath: "/www/wwwroot",
   excludePatterns: [
     ".git",

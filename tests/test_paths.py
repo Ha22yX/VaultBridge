@@ -42,6 +42,6 @@ def test_excludes() -> None:
 
 
 def test_parse_host_port() -> None:
-    assert parse_host_port("147.189.128.208", 22) == ("147.189.128.208", 22)
-    assert parse_host_port("147.189.128.208:2222", 22) == ("147.189.128.208", 2222)
-    assert parse_host_port("ssh://root@147.189.128.208:2222", 22) == ("147.189.128.208", 2222)
+    assert parse_host_port("203.0.113.10", 22) == ("203.0.113.10", 22)
+    assert parse_host_port("203.0.113.10:2222", 22) == ("203.0.113.10", 2222)
+    assert parse_host_port("ssh://root@203.0.113.10:2222", 22) == ("203.0.113.10", 2222)

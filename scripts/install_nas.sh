@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/vaultbridge}"
-DATA_DIR="${DATA_DIR:-/storage/Files/服务器备份/147.189.128.208/.vaultbridge-data}"
+DATA_DIR="${DATA_DIR:-/var/lib/vaultbridge}"
 PORT="${PORT:-8728}"
 
 if ! command -v python3 >/dev/null 2>&1; then
