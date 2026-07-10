@@ -17,4 +17,6 @@ services:
     volumes:
       - ./data:/app/data
       # Set VAULTBRIDGE_BACKUP_HOST_DIR in .env to your real NAS backup folder.
+      - ${VAULTBRIDGE_BACKUP_HOST_DIR:-./backups}:/服务器备份
+      # Compatibility mount for older jobs and English examples.
       - ${VAULTBRIDGE_BACKUP_HOST_DIR:-./backups}:/server-backups

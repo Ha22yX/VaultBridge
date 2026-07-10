@@ -55,10 +55,10 @@ In the web panel, create a job similar to this:
 | SSH user | `root` or a dedicated read-only SSH user |
 | SSH port | `22` |
 | Backup paths | `/www/wwwroot` |
-| Target path | `/server-backups/203.0.113.10` |
+| Target path | `/服务器备份/203.0.113.10` |
 | Schedule | Daily at `03:00` |
 
-For the bundled Docker Compose setup, map your NAS folder into the container and use a target path under that mount, such as `/server-backups/example-site`.
+For the bundled Docker Compose setup, map your NAS folder into the container and use a target path under that mount, such as `/服务器备份/example-site`. The same host folder is also mounted as `/server-backups` for compatibility with older jobs.
 
 ## Local Development
 
@@ -87,7 +87,7 @@ VaultBridge detects the Chocolatey cwRsync package automatically. When password-
 | `VAULTBRIDGE_PORT` | `8728` | Web panel port. |
 | `VAULTBRIDGE_DATA_DIR` | `/app/data` in Docker | Stores the SQLite database, encryption key, and app state. |
 | `BACKUP_SECRET_KEY` | auto-generated if absent | Fernet key used to encrypt stored SSH passwords. Set this explicitly in production. |
-| `VAULTBRIDGE_BACKUP_HOST_DIR` | `./backups` | Host folder mounted into Docker as `/server-backups`. |
+| `VAULTBRIDGE_BACKUP_HOST_DIR` | `./backups` | Host folder mounted into Docker as `/服务器备份` and `/server-backups`. |
 | `VAULTBRIDGE_RSYNC_WORKERS` | `3` | Number of parallel `rsync` workers, clamped between 1 and 8. |
 | `VAULTBRIDGE_RSYNC_RETRIES` | `2` | Retries per `rsync` shard after a dropped connection. |
 | `VAULTBRIDGE_RSYNC_RESUME_RETRIES` | `10` | Whole-run automatic resume attempts before the run is marked failed. |

@@ -13,4 +13,4 @@ def test_compose_uses_configurable_backup_mount() -> None:
     compose = Path("docker-compose.yml").read_text(encoding="utf-8")
 
     assert "${VAULTBRIDGE_BACKUP_HOST_DIR:-./backups}:/server-backups" in compose
-    assert "服务器备份" not in compose
+    assert "${VAULTBRIDGE_BACKUP_HOST_DIR:-./backups}:/服务器备份" in compose

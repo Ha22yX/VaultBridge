@@ -17,7 +17,7 @@ const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const defaults = {
-  targetPath: "/server-backups/example-site",
+  targetPath: "/服务器备份/example-site",
   includePath: "/www/wwwroot",
   excludePatterns: [
     ".git",
