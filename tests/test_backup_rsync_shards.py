@@ -27,9 +27,12 @@ class FakeEntry:
         self.st_mode = mode
 
 
-def test_build_rsync_shards_keeps_root_files_as_file_shards(monkeypatch, tmp_path: Path) -> None:
+def test_build_rsync_shards_batches_root_entries_by_worker_count(monkeypatch, tmp_path: Path) -> None:
     entries = [
         FakeEntry("site-a", stat.S_IFDIR),
+        FakeEntry("site-b", stat.S_IFDIR),
+        FakeEntry("site-c", stat.S_IFDIR),
+        FakeEntry("site-d", stat.S_IFDIR),
         FakeEntry("deploy.sh", stat.S_IFREG),
         FakeEntry("index.html", stat.S_IFREG),
     ]
@@ -37,7 +40,7 @@ def test_build_rsync_shards_keeps_root_files_as_file_shards(monkeypatch, tmp_pat
     def fake_connect_sftp(host: str, port: int, username: str, password: str):
         return FakeSsh(), FakeSftp(entries)
 
-    monkeypatch.setenv("VAULTBRIDGE_RSYNC_WORKERS", "2")
+    monkeypatch.setenv("VAULTBRIDGE_RSYNC_WORKERS", "3")
     monkeypatch.setattr(backup, "connect_sftp", fake_connect_sftp)
 
     shards = backup.build_rsync_shards(
@@ -53,12 +56,23 @@ def test_build_rsync_shards_keeps_root_files_as_file_shards(monkeypatch, tmp_pat
     )
 
     assert len(shards) == 3
-    assert shards[0].remote_path == "/www/wwwroot/deploy.sh"
-    assert not shards[0].source_is_dir
-    assert shards[0].destination == tmp_path
-    assert shards[1].remote_path == "/www/wwwroot/index.html"
-    assert not shards[1].source_is_dir
-    assert shards[1].destination == tmp_path
-    assert shards[2].remote_path == "/www/wwwroot/site-a"
-    assert shards[2].source_is_dir
-    assert shards[2].destination == tmp_path / "site-a"
+    assert all(shard.remote_path == "/www/wwwroot" for shard in shards)
+    assert all(shard.source_is_dir for shard in shards)
+    assert all(shard.destination == tmp_path for shard in shards)
+    assert all(shard.delete for shard in shards)
+    assert sorted(item for shard in shards for item in shard.files_from) == [
+        "deploy.sh",
+        "index.html",
+        "site-a/",
+        "site-b/",
+        "site-c/",
+        "site-d/",
+    ]
+    assert sorted(item for shard in shards for item in shard.expected_children) == [
+        "deploy.sh",
+        "index.html",
+        "site-a",
+        "site-b",
+        "site-c",
+        "site-d",
+    ]

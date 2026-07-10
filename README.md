@@ -29,7 +29,7 @@ For faster backups on Windows, install cwRsync first:
 choco install rsync -y
 ```
 
-VaultBridge detects the Chocolatey cwRsync package automatically. When password-based SSH is used, it supplies the password through OpenSSH `SSH_ASKPASS` instead of putting the password in the rsync command line.
+VaultBridge detects the Chocolatey cwRsync package automatically. When password-based SSH is used, it supplies the password through OpenSSH `SSH_ASKPASS` instead of putting the password in the rsync command line. By default it uses up to 3 rsync workers; each worker receives a batch list of top-level folders via `--files-from`, which keeps incremental syncs from opening a new SSH session for every website folder.
 
 ## Recommended NAS deployment
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import posixpath
 import subprocess
 import shutil
 import stat
@@ -68,6 +67,7 @@ class RsyncShard:
     label: str
     root_files_only: bool = False
     expected_children: tuple[str, ...] = ()
+    files_from: tuple[str, ...] = ()
 
 
 def effective_excludes(job: dict[str, Any]) -> list[str]:
@@ -353,21 +353,45 @@ def build_rsync_shards(job: dict[str, Any], remote: str, destination: Path, excl
     if entries is None:
         return [RsyncShard(remote, destination, True, True, remote)]
 
-    shards: list[RsyncShard] = []
+    items: list[tuple[str, str]] = []
     for attr in sorted(entries, key=lambda item: item.filename.lower()):
         name = attr.filename
         relative = name.replace("\\", "/")
         if should_exclude(name, relative, exclude_patterns):
             continue
         mode = attr.st_mode or 0
-        child_remote = posixpath.join(normalized, name)
         if stat.S_ISDIR(mode):
-            shards.append(RsyncShard(child_remote, destination / name, True, True, name))
+            items.append((f"{name}/", name))
         elif stat.S_ISREG(mode):
-            shards.append(RsyncShard(child_remote, destination, False, False, name))
+            items.append((name, name))
 
-    if len(shards) <= 1:
+    if len(items) <= 1:
         return [RsyncShard(remote, destination, True, True, remote)]
+
+    batch_count = min(rsync_worker_count(), len(items))
+    batches: list[list[str]] = [[] for _ in range(batch_count)]
+    expected_batches: list[list[str]] = [[] for _ in range(batch_count)]
+    for index, (files_from_entry, expected_name) in enumerate(items):
+        batch_index = index % batch_count
+        batches[batch_index].append(files_from_entry)
+        expected_batches[batch_index].append(expected_name)
+
+    shards = []
+    for index, batch in enumerate(batches):
+        preview = ", ".join(entry.rstrip("/") for entry in batch[:3])
+        if len(batch) > 3:
+            preview += f" +{len(batch) - 3}"
+        shards.append(
+            RsyncShard(
+                remote,
+                destination,
+                True,
+                True,
+                f"batch {index + 1}/{batch_count}: {preview}",
+                expected_children=tuple(expected_batches[index]),
+                files_from=tuple(batch),
+            )
+        )
     return shards
 
 
@@ -448,7 +472,7 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
                 display_path = event.current_path or shard.label
                 if display_path in {"", "./"}:
                     display_path = shard.label
-                elif shard.source_is_dir and not display_path.startswith(shard.label):
+                elif shard.source_is_dir and not shard.files_from and not display_path.startswith(shard.label):
                     display_path = f"{shard.label}/{display_path}".replace("//", "/")
                 with state_lock:
                     previous = states.get(shard_index, RsyncProgress())
@@ -489,7 +513,9 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
 
         expected_paths: set[Path] = set()
         for shard in shards:
-            if shard.root_files_only:
+            if shard.files_from:
+                expected_paths.update((destination / name).resolve() for name in shard.expected_children)
+            elif shard.root_files_only:
                 expected_paths.update((destination / name).resolve() for name in shard.expected_children)
             elif shard.source_is_dir:
                 expected_paths.add(shard.destination.resolve())
@@ -513,6 +539,7 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
                             source_is_dir=shard.source_is_dir,
                             delete=shard.delete,
                             root_files_only=shard.root_files_only,
+                            files_from=shard.files_from,
                             progress_callback=make_handler(index, shard),
                             control_callback=progress.check_control,
                         )

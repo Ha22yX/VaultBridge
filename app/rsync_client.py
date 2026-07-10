@@ -303,6 +303,19 @@ def _write_askpass_script() -> str:
             Path(handle.name).chmod(0o700)
 
 
+def _write_files_from_file(entries: tuple[str, ...]) -> str:
+    handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="\n", delete=False)
+    try:
+        for entry in entries:
+            cleaned = entry.replace("\\", "/").lstrip("/")
+            if cleaned:
+                handle.write(cleaned)
+                handle.write("\n")
+        return handle.name
+    finally:
+        handle.close()
+
+
 def _remote_hostkey_sha256(host: str, port: int, username: str, password: str) -> str:
     ssh = connect_ssh(host, port, username, password)
     try:
@@ -329,6 +342,7 @@ def run_rsync_tree(
     source_is_dir: bool = True,
     delete: bool = True,
     root_files_only: bool = False,
+    files_from: tuple[str, ...] = (),
     progress_callback: Callable[[RsyncProgress], None] | None = None,
     control_callback: Callable[[], None] | None = None,
 ) -> tuple[int, int]:
@@ -342,6 +356,7 @@ def run_rsync_tree(
     command: list[str] = []
     password_file: str | None = None
     askpass_file: str | None = None
+    files_from_file: str | None = None
     use_plink = False
     use_askpass = False
 
@@ -418,6 +433,9 @@ def run_rsync_tree(
     ]
     if root_files_only:
         rsync_args.extend(["--exclude", "*/"])
+    if files_from:
+        files_from_file = _write_files_from_file(files_from)
+        rsync_args.extend(["--files-from", _shell_path(files_from_file, tools.cygwin_paths)])
     if delete:
         rsync_args.extend(["--delete", "--delete-excluded"])
     if use_plink:
@@ -451,6 +469,8 @@ def run_rsync_tree(
             Path(password_file).unlink(missing_ok=True)
         if askpass_file:
             Path(askpass_file).unlink(missing_ok=True)
+        if files_from_file:
+            Path(files_from_file).unlink(missing_ok=True)
         raise RsyncUnavailable(str(exc)) from exc
     assert process.stdout is not None
     assert process.stderr is not None
@@ -512,6 +532,8 @@ def run_rsync_tree(
             Path(password_file).unlink(missing_ok=True)
         if askpass_file:
             Path(askpass_file).unlink(missing_ok=True)
+        if files_from_file:
+            Path(files_from_file).unlink(missing_ok=True)
 
     for thread in threads:
         thread.join(timeout=1)
