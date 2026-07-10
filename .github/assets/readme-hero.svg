@@ -1,0 +1,47 @@
+<svg width="1200" height="420" viewBox="0 0 1200 420" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">VaultBridge backup workflow</title>
+  <desc id="desc">A minimal diagram showing a remote server syncing to NAS storage, Git history, and a web panel.</desc>
+  <rect width="1200" height="420" rx="34" fill="#0B1117"/>
+  <rect x="36" y="36" width="1128" height="348" rx="28" fill="#101820" stroke="#243240"/>
+
+  <g opacity=".35">
+    <path d="M0 322C175 260 255 373 423 312C590 251 654 196 815 245C977 294 1009 322 1200 260V420H0V322Z" fill="#1D6B5D"/>
+  </g>
+
+  <g transform="translate(96 118)">
+    <rect width="184" height="184" rx="22" fill="#121C24" stroke="#2E4252"/>
+    <rect x="42" y="42" width="100" height="66" rx="10" fill="#17242D" stroke="#78D7C1"/>
+    <path d="M62 128H122" stroke="#78D7C1" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="70" cy="75" r="6" fill="#78D7C1"/>
+    <circle cx="92" cy="75" r="6" fill="#78D7C1"/>
+    <circle cx="114" cy="75" r="6" fill="#78D7C1"/>
+    <text x="92" y="220" text-anchor="middle" fill="#DCE7EF" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="700">Remote Server</text>
+  </g>
+
+  <path d="M315 210H430" stroke="#78D7C1" stroke-width="5" stroke-linecap="round"/>
+  <path d="M418 194L434 210L418 226" stroke="#78D7C1" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="374" y="187" text-anchor="middle" fill="#8DA2B5" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">SSH / rsync</text>
+
+  <g transform="translate(470 118)">
+    <rect width="184" height="184" rx="22" fill="#122119" stroke="#2F5A4F"/>
+    <path d="M50 74C50 55 65 42 92 42C119 42 134 55 134 74V134C134 153 119 166 92 166C65 166 50 153 50 134V74Z" fill="#183127" stroke="#78D7C1" stroke-width="4"/>
+    <path d="M50 76C50 95 65 108 92 108C119 108 134 95 134 76" stroke="#78D7C1" stroke-width="4"/>
+    <path d="M50 112C50 131 65 144 92 144C119 144 134 131 134 112" stroke="#78D7C1" stroke-width="4"/>
+    <text x="92" y="220" text-anchor="middle" fill="#DCE7EF" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="700">NAS Storage</text>
+  </g>
+
+  <path d="M690 210H805" stroke="#78D7C1" stroke-width="5" stroke-linecap="round"/>
+  <path d="M793 194L809 210L793 226" stroke="#78D7C1" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="748" y="187" text-anchor="middle" fill="#8DA2B5" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18">Git commits</text>
+
+  <g transform="translate(840 118)">
+    <rect width="264" height="184" rx="22" fill="#121C24" stroke="#2E4252"/>
+    <circle cx="68" cy="92" r="16" fill="#78D7C1"/>
+    <circle cx="132" cy="92" r="16" fill="#F6C177"/>
+    <circle cx="196" cy="92" r="16" fill="#8FB7FF"/>
+    <path d="M84 92H116M148 92H180" stroke="#8DA2B5" stroke-width="4" stroke-linecap="round"/>
+    <rect x="50" y="128" width="164" height="18" rx="9" fill="#273645"/>
+    <rect x="50" y="154" width="104" height="18" rx="9" fill="#273645"/>
+    <text x="132" y="220" text-anchor="middle" fill="#DCE7EF" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="700">Versions + Panel</text>
+  </g>
+</svg>

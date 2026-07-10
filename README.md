@@ -1,37 +1,67 @@
-# VaultBridge
+<div align="center">
+  <h1>VaultBridge</h1>
+  <p>Self-hosted NAS backup panel for pulling website files over SSH, syncing with rsync, and keeping every backup as Git history.</p>
 
-Self-hosted NAS backup panel for pulling website files from a remote Linux server, syncing them with `rsync`, and keeping every backup as a Git history point.
+  <p>
+    <a href="#quickstart">Quickstart</a> ·
+    <a href="#features">Features</a> ·
+    <a href="#tech-stack">Tech Stack</a> ·
+    <a href="#restore-a-version">Restore</a>
+  </p>
 
-VaultBridge is built for small server operators who host websites on a VPS, aaPanel/BaoTa, or another Linux box and want simple scheduled backups on a NAS. The source server is treated as read-only: VaultBridge connects over SSH, copies files into a local NAS folder, commits the snapshot to Git, and lets you download any historical version as a zip archive.
+  <p>
+    <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white">
+    <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-backend-009688?style=flat-square&logo=fastapi&logoColor=white">
+    <img alt="Docker" src="https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white">
+    <img alt="rsync" src="https://img.shields.io/badge/rsync-SSH-2E7D64?style=flat-square">
+    <img alt="Git history" src="https://img.shields.io/badge/Git-versioned-F05032?style=flat-square&logo=git&logoColor=white">
+  </p>
+</div>
 
-```mermaid
-flowchart LR
-  A["Remote Linux server<br/>/www/wwwroot"] -->|"SSH + rsync"| B["NAS backup folder"]
-  B --> C["Git repository<br/>one commit per backup"]
-  C --> D["Web panel<br/>versions + zip downloads"]
-```
+<p align="center">
+  <img src=".github/assets/readme-hero.svg" alt="VaultBridge backup workflow" width="100%">
+</p>
 
-## Highlights
+VaultBridge is built for small server operators who host websites on a VPS, aaPanel/BaoTa, or another Linux server and want simple scheduled backups on a NAS. The source server is treated as read-only: VaultBridge connects over SSH, copies files into a local NAS folder, commits the snapshot to Git, and lets you download any historical version as a zip archive.
 
-- Web UI for creating, editing, pausing, resuming, stopping, and deleting backup runs.
-- Daily or weekly schedules with configurable time.
-- Fast incremental transfer with `rsync` over SSH; unchanged files are not sent again.
-- Automatic resume after interrupted `rsync` transfers, keeping partial files locally.
-- Git-backed backup history, so repeated unchanged files are stored efficiently.
-- Version browser with one-click zip download for any Git commit.
-- Read-only source workflow: VaultBridge does not write to, move, or delete files on the remote server.
-- Encrypted SSH passwords at rest using a local Fernet key.
+> Status: focused self-hosted backup tool. Test restores before relying on it for production recovery.
 
-## Quick Start With Docker
+## Tech Stack
 
-Docker is the recommended deployment path for a NAS or a small always-on machine.
+| Layer | Technology | Purpose |
+| --- | --- | --- |
+| Web API | FastAPI, Uvicorn | Serves the backup panel and JSON API. |
+| UI | Vanilla HTML, CSS, JavaScript | Single-page control panel without a frontend build step. |
+| Scheduling | APScheduler | Runs daily or weekly backup jobs. |
+| Remote access | Paramiko, OpenSSH, sshpass | Tests SSH connections, browses folders, and supports password-based SSH in Docker. |
+| Transfer | rsync, SFTP, remote tar fallback | Performs incremental copies and compatibility fallback transfers. |
+| Versioning | Git | Stores each backup snapshot as a commit and builds version archives. |
+| State | SQLite, local data directory | Stores jobs, run history, encrypted credentials, and app state. |
+| Deployment | Docker, Docker Compose | Packages the panel with rsync, SSH tools, and Git for NAS deployment. |
+
+## Features
+
+- Create, edit, pause, resume, stop, and delete website backup jobs from a web panel.
+- Schedule daily or weekly backups at a configured time.
+- Pull files from remote Linux servers over SSH while keeping the source server read-only.
+- Use rsync for fast incremental transfers and automatic resume after interruptions.
+- Commit every backup snapshot into Git for efficient version history.
+- Browse versions and download any historical commit as a zip archive.
+- Encrypt stored SSH passwords with a local Fernet key.
+- Fall back to remote tar streaming or SFTP recursion when rsync is unavailable.
+
+## Quickstart
+
+Docker Compose is the recommended path for a NAS or small always-on machine.
 
 ```bash
+git clone https://github.com/Ha22yX/VaultBridge.git
+cd VaultBridge
 cp .env.example .env
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Put the generated key into `.env` as `BACKUP_SECRET_KEY`, then edit `VAULTBRIDGE_BACKUP_HOST_DIR` so it points to the NAS folder where backups should live.
+Put the generated key into `.env` as `BACKUP_SECRET_KEY`, then set `VAULTBRIDGE_BACKUP_HOST_DIR` to the NAS folder where backups should live.
 
 ```bash
 docker compose up -d --build
@@ -43,11 +73,11 @@ Open the panel:
 http://<nas-ip>:8728
 ```
 
-The Docker image includes `rsync`, `sshpass`, `openssh-client`, and `git`, so password-based SSH backups work without installing extra packages inside the container.
+The Docker image includes `rsync`, `sshpass`, `openssh-client`, and `git`.
 
 ## First Backup Job
 
-In the web panel, create a job similar to this:
+Create a job in the web panel with values like these:
 
 | Field | Example |
 | --- | --- |
@@ -55,44 +85,20 @@ In the web panel, create a job similar to this:
 | SSH user | `root` or a dedicated read-only SSH user |
 | SSH port | `22` |
 | Backup paths | `/www/wwwroot` |
-| Target path | `/服务器备份/203.0.113.10` |
+| Target path | `/server-backups/example-site` |
 | Schedule | Daily at `03:00` |
 
-For the bundled Docker Compose setup, map your NAS folder into the container and use a target path under that mount, such as `/服务器备份/example-site`. The same host folder is also mounted as `/server-backups` for compatibility with older jobs.
+For the bundled Docker Compose setup, map your NAS folder into the container and use a target path under `/server-backups`. The same host folder is also mounted through the compatibility path defined in `docker-compose.yml`, so older jobs can continue to work.
 
-## Local Development
+## How Backups Work
 
-```bash
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -e .[dev]
-python -m app.main
+```mermaid
+flowchart LR
+  A["Remote Linux server"] -->|"SSH + rsync"| B["NAS backup folder"]
+  B --> C["Git repository"]
+  C --> D["Version browser"]
+  D --> E["Zip restore download"]
 ```
-
-Open `http://127.0.0.1:8728`.
-
-On Windows, install cwRsync for the fastest transfer path:
-
-```powershell
-choco install rsync -y
-```
-
-VaultBridge detects the Chocolatey cwRsync package automatically. When password-based SSH is used, the password is supplied through OpenSSH `SSH_ASKPASS`, not placed directly in the visible `rsync` command line.
-
-## Configuration
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `VAULTBRIDGE_HOST` | `0.0.0.0` | Bind address for the web app. |
-| `VAULTBRIDGE_PORT` | `8728` | Web panel port. |
-| `VAULTBRIDGE_DATA_DIR` | `/app/data` in Docker | Stores the SQLite database, encryption key, and app state. |
-| `BACKUP_SECRET_KEY` | auto-generated if absent | Fernet key used to encrypt stored SSH passwords. Set this explicitly in production. |
-| `VAULTBRIDGE_BACKUP_HOST_DIR` | `./backups` | Host folder mounted into Docker as `/服务器备份` and `/server-backups`. |
-| `VAULTBRIDGE_RSYNC_WORKERS` | `3` | Number of parallel `rsync` workers, clamped between 1 and 8. |
-| `VAULTBRIDGE_RSYNC_RETRIES` | `2` | Retries per `rsync` shard after a dropped connection. |
-| `VAULTBRIDGE_RSYNC_RESUME_RETRIES` | `10` | Whole-run automatic resume attempts before the run is marked failed. |
-
-## Backup Behavior
 
 VaultBridge prefers this transfer order:
 
@@ -112,25 +118,26 @@ Each job creates this layout under its target folder:
     vaultbridge-<commit>.zip
 ```
 
-Only `repository/snapshot` is versioned. Generated zip files live outside the Git history.
+Only `repository/snapshot` is versioned. Generated zip files live outside Git history.
 
-## Default Excludes
+## Configuration
 
-Git is a good fit for website code, templates, config, and uploaded assets that change incrementally. To keep repositories practical, VaultBridge excludes noisy or heavy runtime paths by default, including:
+| Variable | Default | Description |
+| --- | --- | --- |
+| `VAULTBRIDGE_HOST` | `0.0.0.0` in Docker | Bind address for the web app. |
+| `VAULTBRIDGE_PORT` | `8728` | Web panel port. |
+| `VAULTBRIDGE_DATA_DIR` | `/app/data` in Docker | SQLite database, encryption key, and app state. |
+| `BACKUP_SECRET_KEY` | auto-generated if absent | Fernet key used to encrypt stored SSH passwords. Set this explicitly in production. |
+| `VAULTBRIDGE_BACKUP_HOST_DIR` | `./backups` | Host folder mounted into Docker as `/server-backups` and the compatibility path in `docker-compose.yml`. |
+| `VAULTBRIDGE_RSYNC_WORKERS` | `3` | Number of parallel rsync workers, clamped between 1 and 8. |
+| `VAULTBRIDGE_RSYNC_RETRIES` | `2` | Retries per rsync shard after a dropped connection. |
+| `VAULTBRIDGE_RSYNC_RESUME_RETRIES` | `10` | Whole-run automatic resume attempts before the run is marked failed. |
 
-- `.git`, `node_modules`, `.venv`, `venv`, `env`, `site-packages`
-- `__pycache__`, `*.pyc`, `.cache`, `cache`, `tmp`
-- `logs`, `*.log`
-- common archives and dumps such as `*.tar.gz`, `*.zip`, `*.7z`, `*.bak`, `*.dump`, `*.sql.gz`
-- SQLite sidecar files such as `*.sqlite-shm`, `*.sqlite-wal`, `*.db-shm`, `*.db-wal`
+## Restore A Version
 
-Linux symlinks are skipped by default to avoid duplicate release directories and Windows Git indexing problems.
+Open the Versions page, choose a backup job, select a commit, and download the generated zip. The archive is built from the Git commit, so it represents the snapshot exactly as it existed at that backup time.
 
-## Restoring A Version
-
-Open the Versions page, choose a backup task, select a commit, and download the generated zip. The archive is built from the Git commit, so it represents the snapshot exactly as it existed at that backup time.
-
-You can also inspect the repository directly on disk:
+You can also inspect the repository directly:
 
 ```bash
 cd <target path>/repository
@@ -138,42 +145,57 @@ git log --oneline
 git checkout <commit> -- snapshot
 ```
 
-## Troubleshooting
+## Development
 
-| Symptom | What to check |
-| --- | --- |
-| `Error reading SSH protocol banner` | The port is probably not the SSH port. Confirm the server SSH port, firewall, and security group. |
-| Transfer feels slow on the first run | The first backup must copy real file contents. Later runs should only transfer changed files. |
-| Run stops during rsync | VaultBridge keeps partial files and retries automatically. Start the run again if all retries are exhausted. |
-| Git commit takes a while | Large first-time snapshots can take time while Git writes object data. |
-| Too few files are backed up | Review the default excludes and confirm the configured source path is the directory you expect. |
+```bash
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -e .[dev]
+python -m app.main
+```
+
+Open `http://127.0.0.1:8728`.
+
+Run the test suite:
+
+```bash
+pytest
+```
+
+On Windows, install cwRsync for the fastest local development transfer path:
+
+```powershell
+choco install rsync -y
+```
 
 ## Project Layout
 
 ```text
 app/
   main.py          FastAPI routes
-  backup.py        backup orchestration, Git commits, run control
+  backup.py        Backup orchestration, Git commits, run control
   rsync_client.py  rsync discovery, command building, progress parsing
   ssh_client.py    SSH, SFTP, tar fallback helpers
-  static/          single-page web UI
+  static/          Single-page web UI
 scripts/
-  install_nas.sh   optional systemd install helper
-tests/             regression tests for paths, rsync, Docker config
+  install_nas.sh   Optional systemd install helper
+tests/             Regression tests for paths, rsync, Docker config
 ```
-
-## Status
-
-VaultBridge is a focused self-hosted backup tool. It is useful today for SSH-accessible Linux website folders, but you should still test restore downloads before relying on it for production recovery.
-
-Planned improvements include backup verification, retention policies, notifications, and committed UI screenshots for the README.
 
 ## Security Notes
 
 - Do not commit real SSH passwords, server keys, panel API keys, or `.env` files.
 - Prefer a dedicated SSH user with read access to the folders you need to back up.
 - Keep `BACKUP_SECRET_KEY` stable after deployment; changing it prevents existing encrypted passwords from being decrypted.
+- Test restore downloads regularly. A backup that has never been restored is only a hypothesis.
+
+## Roadmap
+
+- Backup verification after each run.
+- Retention policies for old archives and commits.
+- Optional notifications for failed or completed backups.
+- Committed UI screenshots once the panel copy is finalized.
 
 ## License
 
-No license file is included yet.
+No license file is included yet. Add a license before distributing this project as an open-source package.
