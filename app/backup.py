@@ -97,6 +97,14 @@ def rsync_retry_count() -> int:
         return 2
 
 
+def rsync_resume_retry_count() -> int:
+    raw = os.getenv("VAULTBRIDGE_RSYNC_RESUME_RETRIES", "10")
+    try:
+        return max(0, min(50, int(raw)))
+    except ValueError:
+        return 10
+
+
 class RunProgress:
     def __init__(self, run_id: int) -> None:
         self.run_id = run_id
@@ -584,6 +592,40 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
     return files, bytes_written
 
 
+def _run_rsync_backup_with_resume(
+    job: dict[str, Any],
+    snapshot: Path,
+    progress: RunProgress,
+    run_id: int,
+) -> tuple[int, int]:
+    retries = rsync_resume_retry_count()
+    for attempt in range(retries + 1):
+        try:
+            return _run_rsync_backup(job, snapshot, progress, run_id)
+        except RsyncFailed as exc:
+            if attempt >= retries:
+                raise
+            retry_number = attempt + 1
+            delay = min(5 + attempt * 5, 45)
+            progress.update(
+                force=True,
+                phase="rsyncing",
+                message=(
+                    f"rsync 连接中断，正在自动继续 {retry_number}/{retries}。"
+                    "已同步和 partial 文件会保留，下一轮会继续增量同步。"
+                ),
+                current_path=progress.current_path,
+                total_files=progress.total_files,
+                copied_files=progress.copied_files,
+                copied_bytes=progress.copied_bytes,
+            )
+            for _ in range(delay):
+                if hasattr(progress, "check_control"):
+                    progress.check_control()
+                time.sleep(1)
+    raise RsyncFailed("rsync failed after automatic resume retries")
+
+
 def _run_tar_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress, run_id: int) -> tuple[int, int]:
     files = 0
     bytes_written = 0
@@ -658,7 +700,7 @@ def run_backup(job_id: int) -> dict[str, str | int]:
         repository.update_run_progress(run_id, phase="connecting", message="Connecting to SSH server")
         try:
             try:
-                files, bytes_written = _run_rsync_backup(job, snapshot, progress, run_id)
+                files, bytes_written = _run_rsync_backup_with_resume(job, snapshot, progress, run_id)
             except RsyncUnavailable as exc:
                 repository.update_run_progress(
                     run_id,
@@ -673,8 +715,8 @@ def run_backup(job_id: int) -> dict[str, str | int]:
                 files, bytes_written = _run_tar_backup(job, snapshot, progress, run_id)
             except RsyncFailed as exc:
                 raise BackupError(
-                    "rsync failed before Git commit. Partial files are kept locally; "
-                    f"run the backup again to continue with rsync. {exc}"
+                    "rsync 多次自动继续后仍然失败。Partial 文件已保留，下一次任务仍会继续增量同步。"
+                    f"{exc}"
                 ) from exc
         except RemoteTarError as exc:
             repository.update_run_progress(

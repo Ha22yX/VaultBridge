@@ -2,6 +2,7 @@ import stat
 from pathlib import Path
 
 from app import backup
+from app.rsync_client import RsyncFailed
 
 
 class FakeSftp:
@@ -25,6 +26,22 @@ class FakeEntry:
     def __init__(self, filename: str, mode: int) -> None:
         self.filename = filename
         self.st_mode = mode
+
+
+class FakeProgress:
+    total_files = 0
+    copied_files = 0
+    total_bytes = 0
+    copied_bytes = 0
+    current_path = ""
+
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def update(self, **fields) -> None:
+        message = fields.get("message")
+        if message:
+            self.messages.append(message)
 
 
 def test_build_rsync_shards_batches_root_entries_by_worker_count(monkeypatch, tmp_path: Path) -> None:
@@ -76,3 +93,25 @@ def test_build_rsync_shards_batches_root_entries_by_worker_count(monkeypatch, tm
         "site-c",
         "site-d",
     ]
+
+
+def test_rsync_backup_auto_continues_after_whole_run_disconnect(monkeypatch, tmp_path: Path) -> None:
+    attempts = 0
+
+    def fake_run_rsync_backup(job, snapshot, progress, run_id):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RsyncFailed("connection unexpectedly closed")
+        return (12, 4096)
+
+    monkeypatch.setenv("VAULTBRIDGE_RSYNC_RESUME_RETRIES", "2")
+    monkeypatch.setattr(backup, "_run_rsync_backup", fake_run_rsync_backup)
+    monkeypatch.setattr(backup.time, "sleep", lambda seconds: None)
+
+    progress = FakeProgress()
+    result = backup._run_rsync_backup_with_resume({}, tmp_path, progress, 7)
+
+    assert result == (12, 4096)
+    assert attempts == 2
+    assert any("自动继续" in message for message in progress.messages)
