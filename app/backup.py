@@ -32,13 +32,19 @@ class RunProgress:
         self._last_write = now
         repository.update_run_progress(self.run_id, **fields)
 
-    def scan_path(self, path: str) -> None:
+    def scan_path(self, path: str, files_found: int = 0, bytes_found: int = 0) -> None:
         self.current_path = path
-        self.update(phase="scanning", message=f"Scanning {path}", current_path=path)
+        self.total_files += files_found
+        self.total_bytes += bytes_found
+        self.update(
+            phase="scanning",
+            message=f"Scanning files. {self.total_files} files found.",
+            current_path=path,
+            total_files=self.total_files,
+            total_bytes=self.total_bytes,
+        )
 
-    def add_totals(self, files: int, bytes_total: int) -> None:
-        self.total_files += files
-        self.total_bytes += bytes_total
+    def finish_scan(self) -> None:
         self.update(
             force=True,
             phase="scanning",
@@ -121,13 +127,13 @@ def run_backup(job_id: int) -> dict[str, str | int]:
         try:
             repository.update_run_progress(run_id, phase="scanning", message="Scanning remote files")
             for remote in job["include_paths"]:
-                current_files, current_bytes = count_tree(
+                count_tree(
                     sftp,
                     remote,
                     job["exclude_patterns"],
                     progress_callback=progress.scan_path,
                 )
-                progress.add_totals(current_files, current_bytes)
+            progress.finish_scan()
 
             repository.update_run_progress(
                 run_id,

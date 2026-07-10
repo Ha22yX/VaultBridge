@@ -138,7 +138,7 @@ def count_tree(
     remote_path: str,
     exclude_patterns: list[str],
     root_remote: str | None = None,
-    progress_callback: Callable[[str], None] | None = None,
+    progress_callback: Callable[[str, int, int], None] | None = None,
 ) -> tuple[int, int]:
     root_remote = normalize_remote_path(root_remote or remote_path)
     remote_path = normalize_remote_path(remote_path)
@@ -146,7 +146,7 @@ def count_tree(
     mode = attr.st_mode or 0
 
     if progress_callback:
-        progress_callback(remote_path)
+        progress_callback(remote_path, 0, 0)
 
     if stat.S_ISLNK(mode):
         return (0, 0)
@@ -169,7 +169,10 @@ def count_tree(
             bytes_total += child_bytes
         return (files, bytes_total)
 
-    return (1, int(attr.st_size or 0))
+    size = int(attr.st_size or 0)
+    if progress_callback:
+        progress_callback(remote_path, 1, size)
+    return (1, size)
 
 
 def download_tree(
