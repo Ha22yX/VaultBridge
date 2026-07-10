@@ -1,13 +1,14 @@
 # VaultBridge
 
-VaultBridge is a Python web panel for backing up website files from a remote Linux server to a NAS folder. The source server is read only: VaultBridge connects over SSH/SFTP, downloads selected folders, and commits the local copy into a Git repository on the backup disk.
+VaultBridge is a Python web panel for backing up website files from a remote Linux server to a NAS folder. The source server is read only: VaultBridge connects over SSH, streams selected folders through remote `tar`, and commits the local copy into a Git repository on the backup disk. If the remote server cannot run `tar`, it falls back to SFTP.
 
 ## What it does
 
-- Browse a remote server over SSH and choose folders to back up.
+- Configure one or more remote folders to back up.
 - Schedule daily or weekly backups from the web panel.
 - Store backups in a local Git repository, so unchanged files are not duplicated every day.
 - View historical commits and download any version as a zip file.
+- Show run details with file count, received files, bytes, current path, and task status.
 - Keep SSH passwords encrypted at rest with a local Fernet key.
 
 ## Quick start

@@ -134,6 +134,7 @@ function phaseLabel(phase) {
     starting: "准备开始",
     preparing: "准备本地仓库",
     connecting: "连接服务器",
+    estimating: "统计远程文件",
     scanning: "扫描文件",
     syncing: "同步文件",
     committing: "写入 Git 版本",
@@ -150,6 +151,7 @@ function progressSummary(run) {
   const copied = Number(run.copied_files || 0);
   const total = Number(run.total_files || 0);
   if (total > 0) return `${copied}/${total} 个文件`;
+  if (copied > 0) return `已接收 ${copied} 个文件`;
   if (run.phase) return phaseLabel(run.phase);
   return "暂无提交";
 }
@@ -157,15 +159,21 @@ function progressSummary(run) {
 function progressForRun(run) {
   const total = Number(run.total_files || 0);
   const copied = Number(run.copied_files || 0);
+  const copiedBytes = Number(run.copied_bytes || 0);
   const phase = run.phase || "";
   if (run.status === "success") return { percent: 100, text: "备份完成", failed: false };
   if (run.status === "failed") return { percent: 100, text: "备份失败", failed: true };
   if (run.status === "stopped") return { percent: Math.max(1, total ? Math.round((copied / total) * 100) : 0), text: "任务已结束，可继续恢复", failed: true };
   if (run.status === "paused") return { percent: Math.max(1, total ? Math.round((copied / total) * 100) : 10), text: "任务已暂停", failed: false };
+  if (phase === "estimating") return { percent: 10, text: "正在服务器端快速统计文件数量", failed: false };
   if (phase === "scanning") return { percent: 12, text: `正在扫描文件：已发现 ${total} 个`, failed: false };
   if (phase === "syncing" && total > 0) {
     const percent = Math.max(15, Math.min(92, Math.round((copied / total) * 100)));
-    return { percent, text: `正在同步：${copied}/${total} 个文件`, failed: false };
+    return { percent, text: `正在快速传输：${copied}/${total} 个文件 · ${formatBytes(copiedBytes)}`, failed: false };
+  }
+  if (phase === "syncing") {
+    const percent = Math.min(90, 18 + (copied % 40));
+    return { percent, text: `正在快速传输：已接收 ${copied} 个文件 · ${formatBytes(copiedBytes)}`, failed: false };
   }
   if (phase === "committing") return { percent: 96, text: "正在写入 Git 版本", failed: false };
   if (phase === "connecting") return { percent: 6, text: "正在连接服务器", failed: false };
