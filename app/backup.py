@@ -89,6 +89,14 @@ def rsync_worker_count() -> int:
         return 3
 
 
+def rsync_retry_count() -> int:
+    raw = os.getenv("VAULTBRIDGE_RSYNC_RETRIES", "2")
+    try:
+        return max(0, min(5, int(raw)))
+    except ValueError:
+        return 2
+
+
 class RunProgress:
     def __init__(self, run_id: int) -> None:
         self.run_id = run_id
@@ -239,6 +247,8 @@ def _run_git(args: list[str], cwd: Path, check: bool = True) -> subprocess.Compl
         capture_output=True,
         check=False,
     )
+    result.stdout = result.stdout or ""
+    result.stderr = result.stderr or ""
     if check and result.returncode != 0:
         raise BackupError(result.stderr.strip() or result.stdout.strip() or "Git command failed")
     return result
@@ -257,8 +267,11 @@ def ensure_repo(job: dict[str, Any]) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     if not (root / ".git").exists():
         _run_git(["init"], root)
-        _run_git(["config", "user.name", "VaultBridge"], root)
-        _run_git(["config", "user.email", "vaultbridge@local"], root)
+    _run_git(["config", "user.name", "VaultBridge"], root)
+    _run_git(["config", "user.email", "vaultbridge@local"], root)
+    _run_git(["config", "core.autocrlf", "false"], root)
+    _run_git(["config", "core.safecrlf", "false"], root)
+    _run_git(["config", "core.longpaths", "true"], root)
     return root
 
 
@@ -285,6 +298,21 @@ def cleanup_rsync_partials(root: Path) -> None:
     for partial in root.rglob(".rsync-partial"):
         if partial.is_dir():
             shutil.rmtree(partial, ignore_errors=True)
+
+
+def cleanup_windows_reparse_points(root: Path) -> None:
+    if os.name != "nt" or not root.exists():
+        return
+    for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        try:
+            if not (path.stat(follow_symlinks=False).st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                continue
+        except (AttributeError, OSError):
+            continue
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            shutil.rmtree(path, ignore_errors=True)
 
 
 def cleanup_stale_top_level(root: Path, expected_paths: set[Path]) -> None:
@@ -326,7 +354,6 @@ def build_rsync_shards(job: dict[str, Any], remote: str, destination: Path, excl
         return [RsyncShard(remote, destination, True, True, remote)]
 
     shards: list[RsyncShard] = []
-    root_files: list[str] = []
     for attr in sorted(entries, key=lambda item: item.filename.lower()):
         name = attr.filename
         relative = name.replace("\\", "/")
@@ -336,22 +363,8 @@ def build_rsync_shards(job: dict[str, Any], remote: str, destination: Path, excl
         child_remote = posixpath.join(normalized, name)
         if stat.S_ISDIR(mode):
             shards.append(RsyncShard(child_remote, destination / name, True, True, name))
-        else:
-            root_files.append(name)
-
-    if root_files:
-        shards.insert(
-            0,
-            RsyncShard(
-                normalized,
-                destination,
-                True,
-                False,
-                "根目录文件",
-                root_files_only=True,
-                expected_children=tuple(root_files),
-            ),
-        )
+        elif stat.S_ISREG(mode):
+            shards.append(RsyncShard(child_remote, destination, False, False, name))
 
     if len(shards) <= 1:
         return [RsyncShard(remote, destination, True, True, remote)]
@@ -425,6 +438,7 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
     for remote in job["include_paths"]:
         progress.check_control()
         destination = snapshot / remote_to_snapshot_path(remote)
+        cleanup_windows_reparse_points(destination)
         shards = build_rsync_shards(job, remote, destination, exclude_patterns)
         states: dict[int, RsyncProgress] = {}
         state_lock = threading.Lock()
@@ -485,20 +499,37 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
             def run_shard(index: int, shard: RsyncShard) -> tuple[int, int]:
                 if index:
                     time.sleep(min(index * 2, 8))
-                return run_rsync_tree(
-                    host=job["host"],
-                    port=job["port"],
-                    username=job["username"],
-                    password=job["password"],
-                    remote_path=shard.remote_path,
-                    destination=shard.destination,
-                    exclude_patterns=exclude_patterns,
-                    source_is_dir=shard.source_is_dir,
-                    delete=shard.delete,
-                    root_files_only=shard.root_files_only,
-                    progress_callback=make_handler(index, shard),
-                    control_callback=progress.check_control,
-                )
+                retries = rsync_retry_count()
+                for attempt in range(retries + 1):
+                    try:
+                        return run_rsync_tree(
+                            host=job["host"],
+                            port=job["port"],
+                            username=job["username"],
+                            password=job["password"],
+                            remote_path=shard.remote_path,
+                            destination=shard.destination,
+                            exclude_patterns=exclude_patterns,
+                            source_is_dir=shard.source_is_dir,
+                            delete=shard.delete,
+                            root_files_only=shard.root_files_only,
+                            progress_callback=make_handler(index, shard),
+                            control_callback=progress.check_control,
+                        )
+                    except RsyncFailed:
+                        if attempt >= retries:
+                            raise
+                        progress.update(
+                            force=True,
+                            phase="rsyncing",
+                            message=f"rsync connection dropped on {shard.label}; retrying {attempt + 1}/{retries}.",
+                            current_path=shard.label,
+                            total_files=progress.total_files,
+                            copied_files=progress.copied_files,
+                            copied_bytes=progress.copied_bytes,
+                        )
+                        time.sleep(3 + attempt * 3)
+                return (0, 0)
 
             futures = [
                 executor.submit(
@@ -601,7 +632,7 @@ def run_backup(job_id: int) -> dict[str, str | int]:
         try:
             try:
                 files, bytes_written = _run_rsync_backup(job, snapshot, progress, run_id)
-            except (RsyncUnavailable, RsyncFailed) as exc:
+            except RsyncUnavailable as exc:
                 repository.update_run_progress(
                     run_id,
                     phase="estimating",
@@ -613,6 +644,11 @@ def run_backup(job_id: int) -> dict[str, str | int]:
                 )
                 progress = RunProgress(run_id)
                 files, bytes_written = _run_tar_backup(job, snapshot, progress, run_id)
+            except RsyncFailed as exc:
+                raise BackupError(
+                    "rsync failed before Git commit. Partial files are kept locally; "
+                    f"run the backup again to continue with rsync. {exc}"
+                ) from exc
         except RemoteTarError as exc:
             repository.update_run_progress(
                 run_id,

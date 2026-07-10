@@ -27,7 +27,7 @@ class FakeEntry:
         self.st_mode = mode
 
 
-def test_build_rsync_shards_groups_root_files(monkeypatch, tmp_path: Path) -> None:
+def test_build_rsync_shards_keeps_root_files_as_file_shards(monkeypatch, tmp_path: Path) -> None:
     entries = [
         FakeEntry("site-a", stat.S_IFDIR),
         FakeEntry("deploy.sh", stat.S_IFREG),
@@ -52,9 +52,13 @@ def test_build_rsync_shards_groups_root_files(monkeypatch, tmp_path: Path) -> No
         [],
     )
 
-    assert len(shards) == 2
-    assert shards[0].root_files_only
-    assert shards[0].expected_children == ("deploy.sh", "index.html")
+    assert len(shards) == 3
+    assert shards[0].remote_path == "/www/wwwroot/deploy.sh"
+    assert not shards[0].source_is_dir
     assert shards[0].destination == tmp_path
-    assert shards[1].remote_path == "/www/wwwroot/site-a"
-    assert shards[1].destination == tmp_path / "site-a"
+    assert shards[1].remote_path == "/www/wwwroot/index.html"
+    assert not shards[1].source_is_dir
+    assert shards[1].destination == tmp_path
+    assert shards[2].remote_path == "/www/wwwroot/site-a"
+    assert shards[2].source_is_dir
+    assert shards[2].destination == tmp_path / "site-a"

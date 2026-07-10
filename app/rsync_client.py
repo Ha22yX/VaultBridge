@@ -402,6 +402,7 @@ def run_rsync_tree(
     rsync_args = [
         tools.rsync,
         "-a",
+        "--no-links",
         "--whole-file",
         "--no-perms",
         "--no-owner",
@@ -418,7 +419,7 @@ def run_rsync_tree(
     if root_files_only:
         rsync_args.extend(["--exclude", "*/"])
     if delete:
-        rsync_args.append("--delete")
+        rsync_args.extend(["--delete", "--delete-excluded"])
     if use_plink:
         rsync_args.append("--blocking-io")
     command.extend(
