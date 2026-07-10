@@ -183,6 +183,32 @@ def _rsync_excludes(patterns: list[str]) -> list[str]:
     return args
 
 
+def _rsync_base_args(*, root_files_only: bool, files_from: bool) -> list[str]:
+    args = [
+        "-a",
+        "--no-links",
+        "--whole-file",
+        "--no-perms",
+        "--no-owner",
+        "--no-group",
+        "--omit-dir-times",
+        "--partial",
+        "--partial-dir=.rsync-partial",
+        "--timeout=180",
+        "--no-motd",
+        "--outbuf=L",
+        "--info=progress2,stats2",
+        "--out-format=VB_FILE:%n|%l",
+    ]
+    if files_from:
+        # With --files-from, rsync changes -a semantics and does not recurse
+        # into listed directories unless -r is specified explicitly.
+        args.append("-r")
+    if root_files_only:
+        args.extend(["--exclude", "*/"])
+    return args
+
+
 def parse_rsync_progress(line: str, current_path: str = "") -> RsyncProgress | None:
     cleaned = line.strip()
     file_match = FILE_RE.match(cleaned)
@@ -414,25 +440,7 @@ def run_rsync_tree(
             ssh_parts.extend(["-o", "BatchMode=yes"])
 
     destination.mkdir(parents=True, exist_ok=True)
-    rsync_args = [
-        tools.rsync,
-        "-a",
-        "--no-links",
-        "--whole-file",
-        "--no-perms",
-        "--no-owner",
-        "--no-group",
-        "--omit-dir-times",
-        "--partial",
-        "--partial-dir=.rsync-partial",
-        "--timeout=180",
-        "--no-motd",
-        "--outbuf=L",
-        "--info=progress2,stats2",
-        "--out-format=VB_FILE:%n|%l",
-    ]
-    if root_files_only:
-        rsync_args.extend(["--exclude", "*/"])
+    rsync_args = [tools.rsync, *_rsync_base_args(root_files_only=root_files_only, files_from=bool(files_from))]
     if files_from:
         files_from_file = _write_files_from_file(files_from)
         rsync_args.extend(["--files-from", _shell_path(files_from_file, tools.cygwin_paths)])

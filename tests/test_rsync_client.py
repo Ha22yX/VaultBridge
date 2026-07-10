@@ -1,6 +1,12 @@
 from pathlib import Path
 
-from app.rsync_client import _remote_target, _rsync_local_path, _windows_to_cygwin_path, parse_rsync_progress
+from app.rsync_client import (
+    _remote_target,
+    _rsync_base_args,
+    _rsync_local_path,
+    _windows_to_cygwin_path,
+    parse_rsync_progress,
+)
 
 
 def test_parse_rsync_file_line() -> None:
@@ -58,3 +64,11 @@ def test_windows_to_cygwin_path() -> None:
 
 def test_rsync_local_path_trailing_slash() -> None:
     assert _rsync_local_path(Path("C:/backup"), cygwin_paths=True).endswith("/")
+
+
+def test_files_from_rsync_args_keep_directory_recursion() -> None:
+    args = _rsync_base_args(root_files_only=False, files_from=True)
+
+    assert "-a" in args
+    assert "-r" in args
+    assert args.index("-r") > args.index("-a")
