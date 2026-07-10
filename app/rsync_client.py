@@ -236,6 +236,35 @@ def _reader(stream, output: queue.Queue[str], prefix: str) -> None:
 def _stop_process(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        try:
+            process.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=8)
+        subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                (
+                    "Get-CimInstance Win32_Process | "
+                    "Where-Object { $_.Name -eq 'ssh.exe' -and "
+                    "$_.ExecutablePath -like '*rsync*tools*bin*ssh.exe' } | "
+                    "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+                ),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return
     process.terminate()
     try:
         process.wait(timeout=8)
@@ -299,6 +328,7 @@ def run_rsync_tree(
     exclude_patterns: list[str],
     source_is_dir: bool = True,
     delete: bool = True,
+    root_files_only: bool = False,
     progress_callback: Callable[[RsyncProgress], None] | None = None,
     control_callback: Callable[[], None] | None = None,
 ) -> tuple[int, int]:
@@ -381,9 +411,12 @@ def run_rsync_tree(
         "--partial-dir=.rsync-partial",
         "--timeout=180",
         "--no-motd",
+        "--outbuf=L",
         "--info=progress2,stats2",
         "--out-format=VB_FILE:%n|%l",
     ]
+    if root_files_only:
+        rsync_args.extend(["--exclude", "*/"])
     if delete:
         rsync_args.append("--delete")
     if use_plink:

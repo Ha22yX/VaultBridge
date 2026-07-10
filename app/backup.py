@@ -37,6 +37,12 @@ class BackupStopped(RuntimeError):
 
 
 PERFORMANCE_EXCLUDES = [
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    "site-packages",
+    "*.pyc",
     "*.tar",
     "*.tar.gz",
     "*.tgz",
@@ -46,6 +52,10 @@ PERFORMANCE_EXCLUDES = [
     "*.bak",
     "*.dump",
     "*.sql.gz",
+    "*.sqlite-shm",
+    "*.sqlite-wal",
+    "*.db-shm",
+    "*.db-wal",
 ]
 
 
@@ -56,6 +66,8 @@ class RsyncShard:
     source_is_dir: bool
     delete: bool
     label: str
+    root_files_only: bool = False
+    expected_children: tuple[str, ...] = ()
 
 
 def effective_excludes(job: dict[str, Any]) -> list[str]:
@@ -70,11 +82,11 @@ def effective_excludes(job: dict[str, Any]) -> list[str]:
 
 
 def rsync_worker_count() -> int:
-    raw = os.getenv("VAULTBRIDGE_RSYNC_WORKERS", "3")
+    raw = os.getenv("VAULTBRIDGE_RSYNC_WORKERS", "2")
     try:
         return max(1, min(8, int(raw)))
     except ValueError:
-        return 3
+        return 2
 
 
 class RunProgress:
@@ -296,14 +308,25 @@ def build_rsync_shards(job: dict[str, Any], remote: str, destination: Path, excl
         return [RsyncShard(remote, destination, True, True, remote)]
 
     normalized = remote.rstrip("/")
-    ssh, sftp = connect_sftp(job["host"], job["port"], job["username"], job["password"])
-    try:
-        entries = sftp.listdir_attr(normalized)
-    finally:
-        sftp.close()
-        ssh.close()
+    entries = None
+    for attempt in range(3):
+        try:
+            ssh, sftp = connect_sftp(job["host"], job["port"], job["username"], job["password"])
+            try:
+                entries = sftp.listdir_attr(normalized)
+                break
+            finally:
+                sftp.close()
+                ssh.close()
+        except Exception:
+            if attempt == 2:
+                return [RsyncShard(remote, destination, True, True, remote)]
+            time.sleep(1 + attempt)
+    if entries is None:
+        return [RsyncShard(remote, destination, True, True, remote)]
 
     shards: list[RsyncShard] = []
+    root_files: list[str] = []
     for attr in sorted(entries, key=lambda item: item.filename.lower()):
         name = attr.filename
         relative = name.replace("\\", "/")
@@ -313,8 +336,22 @@ def build_rsync_shards(job: dict[str, Any], remote: str, destination: Path, excl
         child_remote = posixpath.join(normalized, name)
         if stat.S_ISDIR(mode):
             shards.append(RsyncShard(child_remote, destination / name, True, True, name))
-        elif stat.S_ISREG(mode):
-            shards.append(RsyncShard(child_remote, destination, False, False, name))
+        else:
+            root_files.append(name)
+
+    if root_files:
+        shards.insert(
+            0,
+            RsyncShard(
+                normalized,
+                destination,
+                True,
+                False,
+                "根目录文件",
+                root_files_only=True,
+                expected_children=tuple(root_files),
+            ),
+        )
 
     if len(shards) <= 1:
         return [RsyncShard(remote, destination, True, True, remote)]
@@ -400,7 +437,17 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
                 elif shard.source_is_dir and not display_path.startswith(shard.label):
                     display_path = f"{shard.label}/{display_path}".replace("//", "/")
                 with state_lock:
-                    states[shard_index] = event
+                    previous = states.get(shard_index, RsyncProgress())
+                    states[shard_index] = RsyncProgress(
+                        current_path=display_path,
+                        current_file_size=event.current_file_size or previous.current_file_size,
+                        transferred_bytes=max(previous.transferred_bytes, event.transferred_bytes),
+                        checked_files=max(previous.checked_files, event.checked_files),
+                        total_files=max(previous.total_files, event.total_files),
+                        transferred_files=max(previous.transferred_files, event.transferred_files),
+                        percent=max(previous.percent, event.percent),
+                        message=event.message or previous.message,
+                    )
                     progress.current_path = display_path
                     progress.total_files = sum(item.total_files for item in states.values())
                     progress.copied_files = sum(item.checked_files for item in states.values())
@@ -426,16 +473,19 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
 
             return handle_rsync
 
-        expected_paths = {
-            shard.destination.resolve()
-            if shard.source_is_dir
-            else (destination / PurePosixPath(shard.remote_path).name).resolve()
-            for shard in shards
-        }
+        expected_paths: set[Path] = set()
+        for shard in shards:
+            if shard.root_files_only:
+                expected_paths.update((destination / name).resolve() for name in shard.expected_children)
+            elif shard.source_is_dir:
+                expected_paths.add(shard.destination.resolve())
+            else:
+                expected_paths.add((destination / PurePosixPath(shard.remote_path).name).resolve())
         with ThreadPoolExecutor(max_workers=min(workers, len(shards))) as executor:
-            futures = [
-                executor.submit(
-                    run_rsync_tree,
+            def run_shard(index: int, shard: RsyncShard) -> tuple[int, int]:
+                if index:
+                    time.sleep(min(index * 2, 8))
+                return run_rsync_tree(
                     host=job["host"],
                     port=job["port"],
                     username=job["username"],
@@ -445,8 +495,16 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
                     exclude_patterns=exclude_patterns,
                     source_is_dir=shard.source_is_dir,
                     delete=shard.delete,
+                    root_files_only=shard.root_files_only,
                     progress_callback=make_handler(index, shard),
                     control_callback=progress.check_control,
+                )
+
+            futures = [
+                executor.submit(
+                    run_shard,
+                    index,
+                    shard,
                 )
                 for index, shard in enumerate(shards)
             ]

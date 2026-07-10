@@ -11,11 +11,17 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 const defaults = {
-  targetPath: "/storage/Files/服务器备份/147.189.128.208",
+  targetPath: "/storage/Files/\u670d\u52a1\u5668\u5907\u4efd/147.189.128.208",
   includePath: "/www/wwwroot",
   excludePatterns: [
     ".git",
     "node_modules",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    "site-packages",
+    "*.pyc",
     ".cache",
     "cache",
     "logs",
@@ -31,6 +37,10 @@ const defaults = {
     "*.bak",
     "*.dump",
     "*.sql.gz",
+    "*.sqlite-shm",
+    "*.sqlite-wal",
+    "*.db-shm",
+    "*.db-wal",
   ],
 };
 

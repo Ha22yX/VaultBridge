@@ -6,6 +6,12 @@ from pydantic import BaseModel, Field
 DEFAULT_EXCLUDES = [
     ".git",
     "node_modules",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    "site-packages",
+    "*.pyc",
     ".cache",
     "cache",
     "logs",
@@ -21,6 +27,10 @@ DEFAULT_EXCLUDES = [
     "*.bak",
     "*.dump",
     "*.sql.gz",
+    "*.sqlite-shm",
+    "*.sqlite-wal",
+    "*.db-shm",
+    "*.db-wal",
 ]
 
 
