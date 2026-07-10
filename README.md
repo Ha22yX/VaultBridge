@@ -1,0 +1,82 @@
+# VaultBridge
+
+VaultBridge is a Python web panel for backing up website files from a remote Linux server to a NAS folder. The source server is read only: VaultBridge connects over SSH/SFTP, downloads selected folders, and commits the local copy into a Git repository on the backup disk.
+
+## What it does
+
+- Browse a remote server over SSH and choose folders to back up.
+- Schedule daily or weekly backups from the web panel.
+- Store backups in a local Git repository, so unchanged files are not duplicated every day.
+- View historical commits and download any version as a zip file.
+- Keep SSH passwords encrypted at rest with a local Fernet key.
+
+## Quick start
+
+```bash
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -e .[dev]
+python -m app.main
+```
+
+Open `http://127.0.0.1:8728`.
+
+## Recommended NAS deployment
+
+Run VaultBridge on the NAS or on a machine where the NAS backup folder is mounted locally.
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Put the generated value in `.env` as `BACKUP_SECRET_KEY`, then:
+
+```bash
+docker compose up -d --build
+```
+
+The compose file maps:
+
+```text
+/storage/Files/服务器备份/147.189.128.208
+```
+
+into the container, matching the intended NAS folder.
+
+If your NAS has systemd and Python available, you can also install it as a service:
+
+```bash
+sudo APP_DIR=/opt/vaultbridge bash scripts/install_nas.sh
+```
+
+Copy the project folder to `/opt/vaultbridge` first, or adjust `APP_DIR` to the folder where you placed it.
+
+## Suggested first job
+
+- Source host: your server IP
+- Source user: `root` or a read-only SSH user if you create one later
+- Source folder: `/www/wwwroot`
+- Backup folder: `/storage/Files/服务器备份/147.189.128.208`
+- Schedule: daily or weekly at the time you prefer
+
+Do not commit real SSH passwords, panel API keys, or server secrets to GitHub. Configure them only through the web panel or local `.env`.
+
+## Data layout
+
+For each job, VaultBridge creates:
+
+```text
+<backup folder>/
+  repository/
+    .git/
+    snapshot/
+      www/wwwroot/...
+  archives/
+    <generated version zip files>
+```
+
+Only `repository/snapshot` is versioned. The source server is never modified.
+
+## Notes
+
+Git is convenient for website files, templates, and uploads that change incrementally. Very large binary media, caches, and generated folders can still make a repository heavy, so VaultBridge includes default excludes such as `.git`, `node_modules`, cache, and log folders.

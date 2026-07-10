@@ -1,0 +1,18 @@
+services:
+  vaultbridge:
+    build: .
+    container_name: vaultbridge
+    restart: unless-stopped
+    ports:
+      - "8728:8728"
+    environment:
+      VAULTBRIDGE_HOST: 0.0.0.0
+      VAULTBRIDGE_PORT: 8728
+      VAULTBRIDGE_DATA_DIR: /app/data
+      # Set this once in production. Do not commit real keys.
+      BACKUP_SECRET_KEY: ${BACKUP_SECRET_KEY:-}
+    volumes:
+      - ./data:/app/data
+      # On the NAS, this maps the real backup folder into the container.
+      - /storage/Files/服务器备份/147.189.128.208:/storage/Files/服务器备份/147.189.128.208
+
