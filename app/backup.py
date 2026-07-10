@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import os
+import posixpath
 import subprocess
 import shutil
+import stat
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from . import repository
@@ -17,6 +23,7 @@ from .ssh_client import (
     download_tree,
     estimate_tree_via_ssh,
     remote_to_snapshot_path,
+    should_exclude,
     stream_tar_tree,
 )
 
@@ -42,6 +49,15 @@ PERFORMANCE_EXCLUDES = [
 ]
 
 
+@dataclass
+class RsyncShard:
+    remote_path: str
+    destination: Path
+    source_is_dir: bool
+    delete: bool
+    label: str
+
+
 def effective_excludes(job: dict[str, Any]) -> list[str]:
     patterns: list[str] = []
     seen: set[str] = set()
@@ -51,6 +67,14 @@ def effective_excludes(job: dict[str, Any]) -> list[str]:
             seen.add(cleaned)
             patterns.append(cleaned)
     return patterns
+
+
+def rsync_worker_count() -> int:
+    raw = os.getenv("VAULTBRIDGE_RSYNC_WORKERS", "3")
+    try:
+        return max(1, min(8, int(raw)))
+    except ValueError:
+        return 3
 
 
 class RunProgress:
@@ -251,6 +275,52 @@ def cleanup_rsync_partials(root: Path) -> None:
             shutil.rmtree(partial, ignore_errors=True)
 
 
+def cleanup_stale_top_level(root: Path, expected_paths: set[Path]) -> None:
+    if not root.exists():
+        return
+    expected = {path.resolve() for path in expected_paths}
+    for child in root.iterdir():
+        if child.name == ".rsync-partial":
+            shutil.rmtree(child, ignore_errors=True)
+            continue
+        if child.resolve() in expected:
+            continue
+        if child.is_dir():
+            shutil.rmtree(child, ignore_errors=True)
+        else:
+            child.unlink(missing_ok=True)
+
+
+def build_rsync_shards(job: dict[str, Any], remote: str, destination: Path, exclude_patterns: list[str]) -> list[RsyncShard]:
+    if rsync_worker_count() <= 1:
+        return [RsyncShard(remote, destination, True, True, remote)]
+
+    normalized = remote.rstrip("/")
+    ssh, sftp = connect_sftp(job["host"], job["port"], job["username"], job["password"])
+    try:
+        entries = sftp.listdir_attr(normalized)
+    finally:
+        sftp.close()
+        ssh.close()
+
+    shards: list[RsyncShard] = []
+    for attr in sorted(entries, key=lambda item: item.filename.lower()):
+        name = attr.filename
+        relative = name.replace("\\", "/")
+        if should_exclude(name, relative, exclude_patterns):
+            continue
+        mode = attr.st_mode or 0
+        child_remote = posixpath.join(normalized, name)
+        if stat.S_ISDIR(mode):
+            shards.append(RsyncShard(child_remote, destination / name, True, True, name))
+        elif stat.S_ISREG(mode):
+            shards.append(RsyncShard(child_remote, destination, False, False, name))
+
+    if len(shards) <= 1:
+        return [RsyncShard(remote, destination, True, True, remote)]
+    return shards
+
+
 def _run_sftp_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress, run_id: int) -> tuple[int, int]:
     files = 0
     bytes_written = 0
@@ -304,59 +374,88 @@ def _run_rsync_backup(job: dict[str, Any], snapshot: Path, progress: RunProgress
     files = 0
     bytes_written = 0
     exclude_patterns = effective_excludes(job)
+    workers = rsync_worker_count()
     repository.update_run_progress(
         run_id,
         phase="rsyncing",
-        message="Starting rsync incremental sync. Large archive files are skipped by default.",
+        message=f"Starting rsync incremental sync with up to {workers} workers. Large archive files are skipped by default.",
         total_files=0,
         copied_files=0,
         total_bytes=0,
         copied_bytes=0,
     )
 
-    def handle_rsync(event: RsyncProgress) -> None:
-        progress.current_path = event.current_path or progress.current_path
-        if event.total_files:
-            progress.total_files = event.total_files
-        if event.checked_files:
-            progress.copied_files = event.checked_files
-        if event.transferred_bytes:
-            progress.copied_bytes = event.transferred_bytes
-        if event.total_files:
-            message = (
-                f"rsync incremental sync: checked {event.checked_files}/{event.total_files} items, "
-                f"transferred {event.transferred_files} changed files."
-            )
-        elif event.current_file_size:
-            message = f"rsync checking file: {event.current_path} ({event.current_file_size} bytes)."
-        else:
-            message = f"rsync incremental sync: {event.current_path}"
-        progress.update(
-            phase="rsyncing",
-            message=message,
-            current_path=progress.current_path,
-            total_files=progress.total_files,
-            copied_files=progress.copied_files,
-            copied_bytes=progress.copied_bytes,
-        )
-
     for remote in job["include_paths"]:
         progress.check_control()
         destination = snapshot / remote_to_snapshot_path(remote)
-        current_files, current_bytes = run_rsync_tree(
-            host=job["host"],
-            port=job["port"],
-            username=job["username"],
-            password=job["password"],
-            remote_path=remote,
-            destination=destination,
-            exclude_patterns=exclude_patterns,
-            progress_callback=handle_rsync,
-            control_callback=progress.check_control,
-        )
+        shards = build_rsync_shards(job, remote, destination, exclude_patterns)
+        states: dict[int, RsyncProgress] = {}
+        state_lock = threading.Lock()
+
+        def make_handler(shard_index: int, shard: RsyncShard):
+            def handle_rsync(event: RsyncProgress) -> None:
+                display_path = event.current_path or shard.label
+                if display_path in {"", "./"}:
+                    display_path = shard.label
+                elif shard.source_is_dir and not display_path.startswith(shard.label):
+                    display_path = f"{shard.label}/{display_path}".replace("//", "/")
+                with state_lock:
+                    states[shard_index] = event
+                    progress.current_path = display_path
+                    progress.total_files = sum(item.total_files for item in states.values())
+                    progress.copied_files = sum(item.checked_files for item in states.values())
+                    progress.copied_bytes = sum(item.transferred_bytes for item in states.values())
+                    transferred_files = sum(item.transferred_files for item in states.values())
+                    if progress.total_files:
+                        message = (
+                            f"rsync parallel sync: checked {progress.copied_files}/{progress.total_files} items, "
+                            f"transferred {transferred_files} changed files across {min(workers, len(shards))} workers."
+                        )
+                    elif event.current_file_size:
+                        message = f"rsync checking file: {display_path} ({event.current_file_size} bytes)."
+                    else:
+                        message = f"rsync parallel sync: {display_path}"
+                    progress.update(
+                        phase="rsyncing",
+                        message=message,
+                        current_path=progress.current_path,
+                        total_files=progress.total_files,
+                        copied_files=progress.copied_files,
+                        copied_bytes=progress.copied_bytes,
+                    )
+
+            return handle_rsync
+
+        expected_paths = {
+            shard.destination.resolve()
+            if shard.source_is_dir
+            else (destination / PurePosixPath(shard.remote_path).name).resolve()
+            for shard in shards
+        }
+        with ThreadPoolExecutor(max_workers=min(workers, len(shards))) as executor:
+            futures = [
+                executor.submit(
+                    run_rsync_tree,
+                    host=job["host"],
+                    port=job["port"],
+                    username=job["username"],
+                    password=job["password"],
+                    remote_path=shard.remote_path,
+                    destination=shard.destination,
+                    exclude_patterns=exclude_patterns,
+                    source_is_dir=shard.source_is_dir,
+                    delete=shard.delete,
+                    progress_callback=make_handler(index, shard),
+                    control_callback=progress.check_control,
+                )
+                for index, shard in enumerate(shards)
+            ]
+            for future in as_completed(futures):
+                current_files, current_bytes = future.result()
+                files += current_files
+                bytes_written += current_bytes
         cleanup_rsync_partials(destination)
-        files += current_files
-        bytes_written += current_bytes
+        cleanup_stale_top_level(destination, expected_paths)
     progress.update(
         force=True,
         phase="rsyncing",

@@ -156,11 +156,20 @@ def _windows_program_path(path: str) -> str:
     return path.replace("\\", "/")
 
 
-def _remote_target(username: str, host: str, remote_path: str, *, include_username: bool = True) -> str:
+def _remote_target(
+    username: str,
+    host: str,
+    remote_path: str,
+    *,
+    include_username: bool = True,
+    source_is_dir: bool = True,
+) -> str:
     clean_host = host
     if ":" in clean_host and not clean_host.startswith("["):
         clean_host = f"[{clean_host}]"
-    normalized = normalize_remote_path(remote_path).rstrip("/") + "/"
+    normalized = normalize_remote_path(remote_path).rstrip("/")
+    if source_is_dir:
+        normalized += "/"
     prefix = f"{username}@" if include_username else ""
     return f"{prefix}{clean_host}:{normalized}"
 
@@ -288,6 +297,8 @@ def run_rsync_tree(
     remote_path: str,
     destination: Path,
     exclude_patterns: list[str],
+    source_is_dir: bool = True,
+    delete: bool = True,
     progress_callback: Callable[[RsyncProgress], None] | None = None,
     control_callback: Callable[[], None] | None = None,
 ) -> tuple[int, int]:
@@ -361,7 +372,6 @@ def run_rsync_tree(
     rsync_args = [
         tools.rsync,
         "-a",
-        "--delete",
         "--whole-file",
         "--no-perms",
         "--no-owner",
@@ -374,6 +384,8 @@ def run_rsync_tree(
         "--info=progress2,stats2",
         "--out-format=VB_FILE:%n|%l",
     ]
+    if delete:
+        rsync_args.append("--delete")
     if use_plink:
         rsync_args.append("--blocking-io")
     command.extend(
@@ -382,7 +394,13 @@ def run_rsync_tree(
             *_rsync_excludes(exclude_patterns),
             "-e",
             " ".join(shlex_quote(part) for part in ssh_parts),
-            _remote_target(username, parsed_host, remote_path, include_username=not use_plink),
+            _remote_target(
+                username,
+                parsed_host,
+                remote_path,
+                include_username=not use_plink,
+                source_is_dir=source_is_dir,
+            ),
             _rsync_local_path(destination, tools.cygwin_paths),
         ]
     )

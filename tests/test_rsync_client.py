@@ -43,6 +43,10 @@ def test_remote_target_can_omit_username() -> None:
         _remote_target("root", "example.com", "/www/wwwroot", include_username=False)
         == "example.com:/www/wwwroot/"
     )
+    assert (
+        _remote_target("root", "example.com", "/www/wwwroot/file.txt", source_is_dir=False)
+        == "root@example.com:/www/wwwroot/file.txt"
+    )
 
 
 def test_windows_to_cygwin_path() -> None:
