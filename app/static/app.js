@@ -83,6 +83,19 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (value < 1024) return `${value} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = value / 1024;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[index]}`;
+}
+
 function setPage(page) {
   state.page = page;
   $("dashboardPage").classList.toggle("active-page", page === "dashboard");
@@ -153,7 +166,7 @@ function renderRuns(targetId = "runsList", runs = state.runs) {
           <strong>${escapeHtml(statusLabel(run.status))} · ${escapeHtml(jobName(run.job_id))}</strong>
           <p>${escapeHtml(run.started_at || "")}${run.finished_at ? ` 至 ${escapeHtml(run.finished_at)}` : ""}</p>
           <p>${escapeHtml(run.message || "无消息")}</p>
-          <p>${escapeHtml(run.commit_hash ? `提交 ${run.commit_hash.slice(0, 12)}` : "无提交")}</p>
+          <p>${escapeHtml(run.commit_hash ? `提交 ${run.commit_hash.slice(0, 12)}` : progressSummary(run))}</p>
         </div>
       `,
     )
@@ -170,12 +183,56 @@ function statusLabel(status) {
   return labels[status] || status || "未知";
 }
 
-function progressForStatus(status) {
-  if (status === "success") return { percent: 100, text: "备份完成", failed: false };
-  if (status === "failed") return { percent: 100, text: "备份失败", failed: true };
-  if (status === "running") return { percent: 58, text: "正在连接服务器并同步文件", failed: false };
-  if (status === "queued") return { percent: 15, text: "等待后台任务开始", failed: false };
-  return { percent: 25, text: "正在读取状态", failed: false };
+function phaseLabel(phase) {
+  const labels = {
+    starting: "准备开始",
+    preparing: "准备本地仓库",
+    connecting: "连接服务器",
+    scanning: "扫描文件",
+    syncing: "同步文件",
+    committing: "写入 Git 版本",
+    success: "已完成",
+    failed: "失败",
+    interrupted: "已中断",
+  };
+  return labels[phase] || phase || "等待状态";
+}
+
+function progressSummary(run) {
+  const copied = Number(run.copied_files || 0);
+  const total = Number(run.total_files || 0);
+  if (total > 0) return `${copied}/${total} 个文件`;
+  if (run.phase) return phaseLabel(run.phase);
+  return "暂无提交";
+}
+
+function progressForRun(run) {
+  const total = Number(run.total_files || 0);
+  const copied = Number(run.copied_files || 0);
+  const phase = run.phase || "";
+  if (run.status === "success") {
+    return { percent: 100, text: "备份完成", failed: false };
+  }
+  if (run.status === "failed") {
+    return { percent: 100, text: "备份失败", failed: true };
+  }
+  if (phase === "scanning") {
+    return { percent: 12, text: `正在扫描文件：已发现 ${total} 个`, failed: false };
+  }
+  if (phase === "syncing" && total > 0) {
+    const percent = Math.max(15, Math.min(92, Math.round((copied / total) * 100)));
+    return { percent, text: `正在同步：${copied}/${total} 个文件`, failed: false };
+  }
+  if (phase === "committing") {
+    return { percent: 96, text: "正在写入 Git 版本", failed: false };
+  }
+  if (phase === "connecting") {
+    return { percent: 6, text: "正在连接服务器", failed: false };
+  }
+  if (phase === "preparing") {
+    return { percent: 4, text: "正在准备本地仓库", failed: false };
+  }
+  return { percent: 2, text: phaseLabel(phase), failed: false };
 }
 
 function runById(runId) {
@@ -188,7 +245,11 @@ function jobById(jobId) {
 
 function renderRunDialog(run) {
   const job = jobById(run.job_id);
-  const progress = progressForStatus(run.status);
+  const progress = progressForRun(run);
+  const copiedFiles = Number(run.copied_files || 0);
+  const totalFiles = Number(run.total_files || 0);
+  const copiedBytes = Number(run.copied_bytes || 0);
+  const totalBytes = Number(run.total_bytes || 0);
   $("runDialogTitle").textContent = `${job ? job.name : `任务 #${run.job_id}`} · ${statusLabel(run.status)}`;
   $("runStatusBadge").textContent = statusLabel(run.status);
   $("runProgressText").textContent = progress.text;
@@ -200,8 +261,16 @@ function renderRunDialog(run) {
       <strong>${escapeHtml(job ? job.name : `任务 #${run.job_id}`)}</strong>
     </div>
     <div class="detail-cell">
-      <span>运行状态</span>
-      <strong>${escapeHtml(statusLabel(run.status))}</strong>
+      <span>当前阶段</span>
+      <strong>${escapeHtml(phaseLabel(run.phase))}</strong>
+    </div>
+    <div class="detail-cell">
+      <span>文件进度</span>
+      <strong>${copiedFiles}/${totalFiles || "未知"} 个文件</strong>
+    </div>
+    <div class="detail-cell">
+      <span>大小进度</span>
+      <strong>${formatBytes(copiedBytes)} / ${totalBytes ? formatBytes(totalBytes) : "未知"}</strong>
     </div>
     <div class="detail-cell">
       <span>开始时间</span>
@@ -218,6 +287,10 @@ function renderRunDialog(run) {
     <div class="detail-cell">
       <span>计划时间</span>
       <strong>${escapeHtml(job ? formatSchedule(job) : "未知")}</strong>
+    </div>
+    <div class="detail-cell wide">
+      <span>当前路径</span>
+      <p>${escapeHtml(run.current_path || "尚未开始读取文件")}</p>
     </div>
     <div class="detail-cell wide">
       <span>备份目录</span>

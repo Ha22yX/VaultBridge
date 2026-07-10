@@ -112,10 +112,43 @@ def delete_job(job_id: int) -> None:
 def create_run(job_id: int, status: str, message: str | None = None) -> int:
     with connect() as conn:
         cursor = conn.execute(
-            "INSERT INTO runs (job_id, status, message) VALUES (?, ?, ?)",
-            (job_id, status, message),
+            "INSERT INTO runs (job_id, status, message, phase) VALUES (?, ?, ?, ?)",
+            (job_id, status, message, "starting"),
         )
         return int(cursor.lastrowid)
+
+
+def update_run_progress(
+    run_id: int,
+    *,
+    phase: str | None = None,
+    message: str | None = None,
+    current_path: str | None = None,
+    total_files: int | None = None,
+    copied_files: int | None = None,
+    total_bytes: int | None = None,
+    copied_bytes: int | None = None,
+) -> None:
+    updates: list[str] = []
+    values: list[Any] = []
+    fields = {
+        "phase": phase,
+        "message": message,
+        "current_path": current_path,
+        "total_files": total_files,
+        "copied_files": copied_files,
+        "total_bytes": total_bytes,
+        "copied_bytes": copied_bytes,
+    }
+    for field, value in fields.items():
+        if value is not None:
+            updates.append(f"{field} = ?")
+            values.append(value)
+    if not updates:
+        return
+    values.append(run_id)
+    with connect() as conn:
+        conn.execute(f"UPDATE runs SET {', '.join(updates)} WHERE id = ?", values)
 
 
 def finish_run(run_id: int, status: str, message: str | None = None, commit_hash: str | None = None) -> None:
@@ -123,10 +156,10 @@ def finish_run(run_id: int, status: str, message: str | None = None, commit_hash
         conn.execute(
             """
             UPDATE runs
-            SET status = ?, message = ?, commit_hash = ?, finished_at = CURRENT_TIMESTAMP
+            SET status = ?, phase = ?, message = ?, commit_hash = ?, finished_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
-            (status, message, commit_hash, run_id),
+            (status, status, message, commit_hash, run_id),
         )
 
 
@@ -139,4 +172,3 @@ def list_runs(job_id: int | None = None) -> list[dict[str, Any]]:
         else:
             rows = conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 50").fetchall()
     return [row_to_dict(row) for row in rows if row is not None]
-
