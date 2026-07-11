@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+import os
+import time
 from pathlib import Path
 
 from app import backup
@@ -67,3 +69,30 @@ def test_version_tree_browses_commit_snapshot(monkeypatch, tmp_path: Path) -> No
         {"name": "assets", "path": "www/site-a/assets", "type": "dir", "size": None},
         {"name": "index.html", "path": "www/site-a/index.html", "type": "file", "size": len(INDEX_HTML)},
     ]
+
+
+def test_cleanup_archives_removes_expired_zip_and_part(monkeypatch, tmp_path: Path) -> None:
+    target = tmp_path / "backup-target"
+    archives = target / "archives"
+    archives.mkdir(parents=True)
+    old_zip = archives / "vaultbridge-old.zip"
+    new_zip = archives / "vaultbridge-new.zip"
+    old_part = archives / ".vaultbridge-old.zip.part"
+    ignored = archives / "notes.txt"
+    for path in [old_zip, new_zip, old_part, ignored]:
+        path.write_text("data", encoding="utf-8")
+    now = time.time()
+    old_mtime = now - 3 * 3600
+    for path in [old_zip, old_part]:
+        os.utime(path, (old_mtime, old_mtime))
+    monkeypatch.setattr(backup.repository, "list_jobs", lambda: [{"target_path": str(target)}])
+    monkeypatch.setattr(backup, "archive_retention_hours", lambda: 1)
+    monkeypatch.setattr(backup, "archive_partial_retention_hours", lambda: 1)
+
+    result = backup.cleanup_archives(now=now)
+
+    assert result["deleted"] == 2
+    assert not old_zip.exists()
+    assert not old_part.exists()
+    assert new_zip.exists()
+    assert ignored.exists()

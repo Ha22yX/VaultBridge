@@ -141,6 +141,9 @@ Only `repository/snapshot` is versioned. Generated zip files live outside Git hi
 | `VAULTBRIDGE_RSYNC_WORKERS` | `3` | Number of parallel rsync workers, clamped between 1 and 8. |
 | `VAULTBRIDGE_RSYNC_RETRIES` | `2` | Retries per rsync shard after a dropped connection. |
 | `VAULTBRIDGE_RSYNC_RESUME_RETRIES` | `10` | Whole-run automatic resume attempts before the run is marked failed. |
+| `VAULTBRIDGE_ARCHIVE_RETENTION_HOURS` | `24` | Deletes generated version zip archives older than this many hours. Set to `0` to keep zip archives. |
+| `VAULTBRIDGE_ARCHIVE_PARTIAL_RETENTION_HOURS` | `6` | Deletes leftover `.zip.part` files older than this many hours. Set to `0` to keep partial files. |
+| `VAULTBRIDGE_ARCHIVE_CLEANUP_INTERVAL_MINUTES` | `60` | How often the background cleanup job scans archive folders. Minimum is 5 minutes. |
 
 ## Restore A Version
 

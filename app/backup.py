@@ -15,6 +15,7 @@ from typing import Any
 
 from . import repository
 from .rsync_client import RsyncFailed, RsyncProgress, RsyncUnavailable, has_rsync, run_rsync_tree
+from .settings import archive_partial_retention_hours, archive_retention_hours
 from .ssh_client import (
     RemoteTarError,
     connect_sftp,
@@ -1045,3 +1046,35 @@ def archive_task_file(task_id: str) -> Path:
     if not path.exists():
         raise BackupError("Archive file no longer exists")
     return path
+
+
+def cleanup_archives(now: float | None = None) -> dict[str, int]:
+    current = time.time() if now is None else now
+    zip_retention_seconds = archive_retention_hours() * 3600
+    partial_retention_seconds = archive_partial_retention_hours() * 3600
+    deleted = 0
+    bytes_deleted = 0
+    scanned_dirs = 0
+
+    for job in repository.list_jobs():
+        archives = archives_root(job)
+        if not archives.exists():
+            continue
+        scanned_dirs += 1
+        for path in archives.iterdir():
+            if not path.is_file():
+                continue
+            if path.suffix == ".zip":
+                retention_seconds = zip_retention_seconds
+            elif path.name.endswith(".zip.part"):
+                retention_seconds = partial_retention_seconds
+            else:
+                continue
+            if retention_seconds <= 0 or current - path.stat().st_mtime < retention_seconds:
+                continue
+            size = path.stat().st_size
+            path.unlink(missing_ok=True)
+            deleted += 1
+            bytes_deleted += size
+
+    return {"scanned_dirs": scanned_dirs, "deleted": deleted, "bytes_deleted": bytes_deleted}

@@ -29,3 +29,14 @@ def bind_host() -> str:
 def bind_port() -> int:
     return int(os.getenv("VAULTBRIDGE_PORT", "8728"))
 
+
+def archive_retention_hours() -> float:
+    return max(0.0, float(os.getenv("VAULTBRIDGE_ARCHIVE_RETENTION_HOURS", "24")))
+
+
+def archive_partial_retention_hours() -> float:
+    return max(0.0, float(os.getenv("VAULTBRIDGE_ARCHIVE_PARTIAL_RETENTION_HOURS", "6")))
+
+
+def archive_cleanup_interval_minutes() -> int:
+    return max(5, int(os.getenv("VAULTBRIDGE_ARCHIVE_CLEANUP_INTERVAL_MINUTES", "60")))
