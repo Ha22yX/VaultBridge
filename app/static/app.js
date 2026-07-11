@@ -12,6 +12,8 @@ const state = {
   syncTimer: null,
   syncBusy: false,
   highlightRunId: null,
+  archiveTaskTimer: null,
+  archiveDownloadBusy: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -498,6 +500,88 @@ function renderVersionSummary(detail) {
   $("versionDownloadBtn").href = `/api/jobs/${state.selectedJobId}/versions/${detail.commit}/download`;
 }
 
+function resetArchiveProgress() {
+  clearTimeout(state.archiveTaskTimer);
+  state.archiveTaskTimer = null;
+  state.archiveDownloadBusy = false;
+  const progress = $("archiveProgress");
+  const button = $("versionDownloadBtn");
+  if (progress) progress.hidden = true;
+  if ($("archiveProgressBar")) $("archiveProgressBar").style.width = "0%";
+  if ($("archiveProgressPercent")) $("archiveProgressPercent").textContent = "0%";
+  if ($("archiveProgressTitle")) $("archiveProgressTitle").textContent = "正在准备下载";
+  if ($("archiveProgressMessage")) $("archiveProgressMessage").textContent = "正在压缩 zip...";
+  if (button) {
+    button.classList.remove("is-disabled");
+    button.removeAttribute("aria-disabled");
+  }
+}
+
+function renderArchiveProgress(task) {
+  const progress = $("archiveProgress");
+  if (!progress) return;
+  progress.hidden = false;
+  const percent = Math.max(0, Math.min(100, Math.round(Number(task.percent || 0))));
+  $("archiveProgressBar").style.width = `${percent}%`;
+  $("archiveProgressPercent").textContent = `${percent}%`;
+  const title = task.status === "ready" ? "压缩完成" : task.status === "failed" ? "压缩失败" : "正在压缩 zip";
+  $("archiveProgressTitle").textContent = title;
+  $("archiveProgressMessage").textContent = task.message || "正在压缩 zip...";
+}
+
+function triggerArchiveDownload(task) {
+  if (!task.download_url) return;
+  const a = document.createElement("a");
+  a.href = task.download_url;
+  a.download = "";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+async function pollArchiveTask(taskId) {
+  clearTimeout(state.archiveTaskTimer);
+  const task = await api(`/api/archive-tasks/${taskId}`);
+  renderArchiveProgress(task);
+  if (task.status === "ready") {
+    $("versionDownloadBtn").classList.remove("is-disabled");
+    $("versionDownloadBtn").removeAttribute("aria-disabled");
+    triggerArchiveDownload(task);
+    toast("zip 已准备好，浏览器开始下载。");
+    return;
+  }
+  if (task.status === "failed") {
+    $("versionDownloadBtn").classList.remove("is-disabled");
+    $("versionDownloadBtn").removeAttribute("aria-disabled");
+    throw new Error(task.message || "压缩失败");
+  }
+  await sleep(900);
+  if (!state.archiveDownloadBusy) return;
+  await pollArchiveTask(taskId);
+}
+
+async function startVersionArchiveDownload(commit = null) {
+  const version = state.activeVersion;
+  const targetCommit = commit || version?.commit;
+  if (!state.selectedJobId || !targetCommit || state.archiveDownloadBusy) return;
+  state.archiveDownloadBusy = true;
+  const button = $("versionDownloadBtn");
+  button.classList.add("is-disabled");
+  button.setAttribute("aria-disabled", "true");
+  renderArchiveProgress({ percent: 0, message: "正在创建压缩任务..." });
+  try {
+    const task = await api(`/api/jobs/${state.selectedJobId}/versions/${targetCommit}/archive`, { method: "POST" });
+    renderArchiveProgress(task);
+    await pollArchiveTask(task.id);
+  } catch (error) {
+    toast(`下载失败：${error.message}`);
+    button.classList.remove("is-disabled");
+    button.removeAttribute("aria-disabled");
+  } finally {
+    state.archiveDownloadBusy = false;
+  }
+}
+
 function renderBreadcrumbs(path) {
   const parts = path ? path.split("/") : [];
   const crumbs = [`<button class="crumb" data-version-path="" type="button">snapshot</button>`];
@@ -620,10 +704,11 @@ async function loadVersionTree(path = "") {
   }
 }
 
-async function openVersionDialog(commit) {
+async function openVersionDialog(commit, options = {}) {
   const version = state.versions.find((item) => item.commit === commit) || { commit };
   state.activeVersion = version;
   state.activeVersionPath = "";
+  resetArchiveProgress();
   $("versionDialog").showModal();
   $("versionSummary").innerHTML = `<div class="loading-state"><span></span><span></span></div>`;
   $("versionTree").className = "file-browser loading-state";
@@ -632,11 +717,15 @@ async function openVersionDialog(commit) {
   state.activeVersion = detail;
   renderVersionSummary(detail);
   await loadVersionTree("");
+  if (options.startDownload) {
+    startVersionArchiveDownload(detail.commit);
+  }
 }
 
 function closeVersionDialog() {
   state.activeVersion = null;
   state.activeVersionPath = "";
+  resetArchiveProgress();
   $("versionDialog").close();
 }
 
@@ -950,7 +1039,13 @@ function bindEvents() {
 
   $("versionsList").addEventListener("click", (event) => {
     const download = event.target.closest("a[data-version-action='download']");
-    if (download) return;
+    if (download) {
+      event.preventDefault();
+      const row = download.closest("[data-version-commit]");
+      const commit = row?.dataset.versionCommit;
+      if (commit) openVersionDialog(commit, { startDownload: true }).catch((error) => toast(`下载失败：${error.message}`));
+      return;
+    }
     const button = event.target.closest("[data-version-commit], button[data-version-action='browse']");
     if (!button) return;
     event.preventDefault();
@@ -998,6 +1093,10 @@ function bindEvents() {
 
   $("closeVersionDialogBtn").addEventListener("click", closeVersionDialog);
   $("closeVersionDialogBottomBtn").addEventListener("click", closeVersionDialog);
+  $("versionDownloadBtn").addEventListener("click", (event) => {
+    event.preventDefault();
+    startVersionArchiveDownload().catch((error) => toast(`下载失败：${error.message}`));
+  });
   $("versionDialog").addEventListener("click", (event) => {
     if (event.target === $("versionDialog")) closeVersionDialog();
   });

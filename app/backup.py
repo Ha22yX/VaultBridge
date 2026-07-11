@@ -6,6 +6,7 @@ import shutil
 import stat
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
@@ -33,6 +34,10 @@ class BackupError(RuntimeError):
 
 class BackupStopped(RuntimeError):
     pass
+
+
+ARCHIVE_PROGRESS: dict[str, dict[str, Any]] = {}
+ARCHIVE_PROGRESS_LOCK = threading.Lock()
 
 
 PERFORMANCE_EXCLUDES = [
@@ -894,3 +899,149 @@ def create_archive(job_id: int, commit: str) -> Path:
     output = archives / f"vaultbridge-{safe_commit[:12]}.zip"
     _run_git(["archive", "--format=zip", f"--output={output}", safe_commit, "snapshot"], root)
     return output
+
+
+def _archive_progress_snapshot(task_id: str) -> dict[str, Any]:
+    with ARCHIVE_PROGRESS_LOCK:
+        task = ARCHIVE_PROGRESS.get(task_id)
+        if not task:
+            raise BackupError("Archive task not found")
+        return dict(task)
+
+
+def get_archive_task(task_id: str) -> dict[str, Any]:
+    return _archive_progress_snapshot(task_id)
+
+
+def _set_archive_progress(task_id: str, **fields: Any) -> None:
+    with ARCHIVE_PROGRESS_LOCK:
+        task = ARCHIVE_PROGRESS.get(task_id)
+        if not task:
+            return
+        task.update(fields)
+        task["updated_at"] = time.time()
+
+
+def _run_archive_task(task_id: str, job_id: int, commit: str) -> None:
+    job = repository.get_job(job_id)
+    root = repo_root(job)
+    safe_commit = _safe_commit_ref(commit)
+    archives = archives_root(job)
+    archives.mkdir(parents=True, exist_ok=True)
+    output = archives / f"vaultbridge-{safe_commit[:12]}.zip"
+    partial = archives / f".vaultbridge-{safe_commit[:12]}-{task_id}.zip.part"
+    summary = _version_snapshot_summary(root, safe_commit)
+    total_bytes = int(summary.get("total_bytes") or 0)
+    total_files = int(summary.get("file_count") or 0)
+
+    _set_archive_progress(
+        task_id,
+        status="running",
+        phase="compressing",
+        message=f"Compressing {total_files} files into a zip archive.",
+        percent=2,
+        total_bytes=total_bytes,
+        total_files=total_files,
+        written_bytes=0,
+    )
+
+    partial.unlink(missing_ok=True)
+    process = subprocess.Popen(
+        ["git", "archive", "--format=zip", f"--output={partial}", safe_commit, "snapshot"],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        while process.poll() is None:
+            written = partial.stat().st_size if partial.exists() else 0
+            if total_bytes > 0:
+                percent = min(95, max(2, int((written / total_bytes) * 100)))
+            else:
+                percent = 50
+            _set_archive_progress(
+                task_id,
+                percent=percent,
+                written_bytes=written,
+                message=f"Compressing zip archive: {format_bytes_for_message(written)} written.",
+            )
+            time.sleep(0.5)
+        stdout, stderr = process.communicate()
+        if process.returncode != 0:
+            partial.unlink(missing_ok=True)
+            raise BackupError((stderr or stdout or "Git archive failed").strip())
+        partial.replace(output)
+        written = output.stat().st_size if output.exists() else 0
+        _set_archive_progress(
+            task_id,
+            status="ready",
+            phase="ready",
+            message=f"Zip archive is ready: {format_bytes_for_message(written)}.",
+            percent=100,
+            written_bytes=written,
+            archive_path=str(output),
+            download_url=f"/api/archive-tasks/{task_id}/download",
+        )
+    except Exception as exc:
+        partial.unlink(missing_ok=True)
+        _set_archive_progress(
+            task_id,
+            status="failed",
+            phase="failed",
+            message=str(exc),
+            percent=100,
+        )
+
+
+def format_bytes_for_message(bytes_value: int) -> str:
+    value = float(bytes_value or 0)
+    units = ["B", "KB", "MB", "GB", "TB"]
+    index = 0
+    while value >= 1024 and index < len(units) - 1:
+        value /= 1024
+        index += 1
+    if index == 0:
+        return f"{int(value)} {units[index]}"
+    return f"{value:.1f} {units[index]}"
+
+
+def start_archive_task(job_id: int, commit: str) -> dict[str, Any]:
+    job = repository.get_job(job_id)
+    root = repo_root(job)
+    if not (root / ".git").exists():
+        raise BackupError("No Git repository exists for this job yet")
+    safe_commit = _safe_commit_ref(commit)
+    existing = archives_root(job) / f"vaultbridge-{safe_commit[:12]}.zip"
+    task_id = uuid.uuid4().hex
+    with ARCHIVE_PROGRESS_LOCK:
+        ARCHIVE_PROGRESS[task_id] = {
+            "id": task_id,
+            "job_id": job_id,
+            "commit": safe_commit,
+            "status": "ready" if existing.exists() else "queued",
+            "phase": "ready" if existing.exists() else "queued",
+            "message": "Zip archive is already ready." if existing.exists() else "Preparing zip archive.",
+            "percent": 100 if existing.exists() else 0,
+            "total_bytes": 0,
+            "total_files": 0,
+            "written_bytes": existing.stat().st_size if existing.exists() else 0,
+            "archive_path": str(existing) if existing.exists() else "",
+            "download_url": f"/api/archive-tasks/{task_id}/download" if existing.exists() else "",
+            "created_at": time.time(),
+            "updated_at": time.time(),
+        }
+    if not existing.exists():
+        thread = threading.Thread(target=_run_archive_task, args=(task_id, job_id, safe_commit), daemon=True)
+        thread.start()
+    return _archive_progress_snapshot(task_id)
+
+
+def archive_task_file(task_id: str) -> Path:
+    task = _archive_progress_snapshot(task_id)
+    if task.get("status") != "ready" or not task.get("archive_path"):
+        raise BackupError("Archive is not ready yet")
+    path = Path(str(task["archive_path"]))
+    if not path.exists():
+        raise BackupError("Archive file no longer exists")
+    return path

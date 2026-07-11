@@ -574,6 +574,11 @@ small {
   transform: translateY(-1px);
 }
 
+.button.is-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 .button:active {
   transform: translateY(1px) scale(0.99);
 }
@@ -681,6 +686,69 @@ small {
 .dialog-actions {
   align-items: center;
   flex-wrap: wrap;
+}
+
+.archive-progress {
+  display: grid;
+  flex: 1 1 280px;
+  min-width: min(320px, 100%);
+  gap: 7px;
+  border: 1px solid rgba(8, 120, 90, 0.16);
+  border-radius: var(--radius);
+  background: rgba(226, 241, 235, 0.5);
+  padding: 10px 12px;
+  animation: archiveProgressIn 260ms var(--ease-out) both;
+}
+
+.archive-progress[hidden] {
+  display: none;
+}
+
+.archive-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.archive-progress-head strong,
+.archive-progress-head span {
+  font-size: 12px;
+}
+
+.archive-progress-head strong {
+  color: var(--ink);
+}
+
+.archive-progress-head span {
+  color: var(--accent-dark);
+  font-weight: 850;
+}
+
+.archive-progress-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(8, 120, 90, 0.14);
+}
+
+.archive-progress-track span {
+  display: block;
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 420ms var(--ease-out);
+}
+
+.archive-progress p {
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dialog-spacer {
@@ -1063,6 +1131,17 @@ small {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes archiveProgressIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

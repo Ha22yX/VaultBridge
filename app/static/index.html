@@ -256,6 +256,16 @@
 
         <div class="dialog-actions">
           <a id="versionDownloadBtn" class="button secondary" href="#">下载 zip</a>
+          <div id="archiveProgress" class="archive-progress" hidden>
+            <div class="archive-progress-head">
+              <strong id="archiveProgressTitle">正在准备下载</strong>
+              <span id="archiveProgressPercent">0%</span>
+            </div>
+            <div class="archive-progress-track" aria-hidden="true">
+              <span id="archiveProgressBar"></span>
+            </div>
+            <p id="archiveProgressMessage">正在压缩 zip...</p>
+          </div>
           <span class="dialog-spacer"></span>
           <button id="closeVersionDialogBottomBtn" class="button primary" type="button">关闭</button>
         </div>

@@ -8,7 +8,16 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import repository
-from .backup import create_archive, get_version_detail, list_version_tree, list_versions, run_backup
+from .backup import (
+    archive_task_file,
+    create_archive,
+    get_archive_task,
+    get_version_detail,
+    list_version_tree,
+    list_versions,
+    run_backup,
+    start_archive_task,
+)
 from .db import init_db
 from .schemas import BrowseIn, ConnectionIn, JobIn, JobPatch, RunControlIn
 from .scheduler import reload_jobs, start_scheduler, stop_scheduler
@@ -179,6 +188,31 @@ def api_version_tree(job_id: int, commit: str, path: str = Query(default="")) ->
 def api_download_version(job_id: int, commit: str) -> FileResponse:
     try:
         archive = create_archive(job_id, commit)
+        return FileResponse(archive, filename=archive.name, media_type="application/zip")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/jobs/{job_id}/versions/{commit}/archive")
+def api_start_archive(job_id: int, commit: str) -> dict:
+    try:
+        return start_archive_task(job_id, commit)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/archive-tasks/{task_id}")
+def api_archive_progress(task_id: str) -> dict:
+    try:
+        return get_archive_task(task_id)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/archive-tasks/{task_id}/download")
+def api_download_archive_task(task_id: str) -> FileResponse:
+    try:
+        archive = archive_task_file(task_id)
         return FileResponse(archive, filename=archive.name, media_type="application/zip")
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
