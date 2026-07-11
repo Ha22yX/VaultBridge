@@ -6,6 +6,7 @@ import uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
 from . import repository
 from .backup import (
@@ -28,6 +29,10 @@ from .ssh_client import connect_sftp, list_remote, normalize_remote_path
 app = FastAPI(title=APP_NAME)
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+def cleanup_download_archive(path: Path) -> None:
+    path.unlink(missing_ok=True)
 
 
 @app.on_event("startup")
@@ -188,7 +193,12 @@ def api_version_tree(job_id: int, commit: str, path: str = Query(default="")) ->
 def api_download_version(job_id: int, commit: str) -> FileResponse:
     try:
         archive = create_archive(job_id, commit)
-        return FileResponse(archive, filename=archive.name, media_type="application/zip")
+        return FileResponse(
+            archive,
+            filename=archive.name,
+            media_type="application/zip",
+            background=BackgroundTask(cleanup_download_archive, archive),
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -213,7 +223,12 @@ def api_archive_progress(task_id: str) -> dict:
 def api_download_archive_task(task_id: str) -> FileResponse:
     try:
         archive = archive_task_file(task_id)
-        return FileResponse(archive, filename=archive.name, media_type="application/zip")
+        return FileResponse(
+            archive,
+            filename=archive.name,
+            media_type="application/zip",
+            background=BackgroundTask(cleanup_download_archive, archive),
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
