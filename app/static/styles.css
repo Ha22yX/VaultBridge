@@ -645,6 +645,8 @@ small {
 
 .job-dialog {
   width: min(780px, calc(100vw - 28px));
+  max-height: calc(100dvh - 28px);
+  overflow: visible;
   border: 0;
   border-radius: var(--radius-lg);
   background: transparent;
@@ -663,6 +665,8 @@ small {
 .dialog-card {
   display: grid;
   gap: 18px;
+  max-height: calc(100dvh - 28px);
+  overflow: auto;
   border: 1px solid rgba(221, 229, 221, 0.94);
   border-radius: var(--radius-lg);
   background:
