@@ -17,4 +17,4 @@ def test_version_detail_and_tree_routes_are_registered() -> None:
 def test_versions_route_allows_numeric_metadata() -> None:
     route = next(route for route in app.routes if getattr(route, "path", "") == "/api/jobs/{job_id}/versions")
 
-    assert route.response_model == list[dict]
+    assert route.response_model == dict

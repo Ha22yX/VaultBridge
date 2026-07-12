@@ -15,7 +15,7 @@ from .backup import (
     get_archive_task,
     get_version_detail,
     list_version_tree,
-    list_versions,
+    list_versions_page,
     run_backup,
     start_archive_task,
 )
@@ -162,9 +162,13 @@ def api_run_now(job_id: int, background_tasks: BackgroundTasks) -> dict[str, str
 
 
 @app.get("/api/jobs/{job_id}/versions")
-def api_versions(job_id: int) -> list[dict]:
+def api_versions(
+    job_id: int,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict:
     try:
-        return list_versions(job_id)
+        return list_versions_page(job_id, limit=limit, offset=offset)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

@@ -360,6 +360,21 @@ h2 {
   padding: 16px 18px 18px;
 }
 
+.pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding: 0 18px 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pagination-bar[hidden] {
+  display: none;
+}
+
 .empty,
 .empty-state {
   color: var(--muted);

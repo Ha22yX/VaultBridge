@@ -841,18 +841,28 @@ def _version_log_entry(job_id: int, root: Path, commit: str) -> dict[str, Any]:
     }
 
 
-def list_versions(job_id: int) -> list[dict[str, Any]]:
+def list_versions_page(job_id: int, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+    safe_limit = max(1, min(int(limit), 100))
+    safe_offset = max(0, int(offset))
     job = repository.get_job(job_id)
     root = repo_root(job)
     if not (root / ".git").exists():
-        return []
+        return {"items": [], "total": 0, "limit": safe_limit, "offset": safe_offset, "has_more": False}
+    count_result = _run_git(["rev-list", "--count", "HEAD"], root, check=False)
+    total = int(count_result.stdout.strip() or 0) if count_result.returncode == 0 else 0
     result = _run_git(
-        ["log", "--pretty=format:%H%x09%ad%x09%s", "--date=format:%Y-%m-%d %H:%M:%S", "--max-count=100"],
+        [
+            "log",
+            "--pretty=format:%H%x09%ad%x09%s",
+            "--date=format:%Y-%m-%d %H:%M:%S",
+            f"--max-count={safe_limit}",
+            f"--skip={safe_offset}",
+        ],
         root,
         check=False,
     )
     if result.returncode != 0 or not result.stdout.strip():
-        return []
+        return {"items": [], "total": total, "limit": safe_limit, "offset": safe_offset, "has_more": False}
     log_entries = []
     for line in result.stdout.splitlines():
         commit, date, subject = line.split("\t", 2)
@@ -878,7 +888,17 @@ def list_versions(job_id: int) -> list[dict[str, Any]]:
                 **summary,
             }
         )
-    return versions
+    return {
+        "items": versions,
+        "total": total,
+        "limit": safe_limit,
+        "offset": safe_offset,
+        "has_more": safe_offset + len(versions) < total,
+    }
+
+
+def list_versions(job_id: int) -> list[dict[str, Any]]:
+    return list_versions_page(job_id, limit=100, offset=0)["items"]
 
 
 def get_version_detail(job_id: int, commit: str) -> dict[str, Any]:

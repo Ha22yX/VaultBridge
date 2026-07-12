@@ -36,6 +36,13 @@ def _create_repo(tmp_path: Path) -> tuple[Path, str]:
     return target, commit
 
 
+def _append_snapshot_commit(root: Path, name: str, content: str) -> str:
+    (root / "snapshot" / name).write_text(content, encoding="utf-8")
+    _git(["add", "snapshot"], root)
+    _git(["commit", "-m", f"Backup {name}"], root)
+    return _git(["rev-parse", "HEAD"], root)
+
+
 def test_list_versions_includes_snapshot_size(monkeypatch, tmp_path: Path) -> None:
     target, commit = _create_repo(tmp_path)
     cache = {}
@@ -75,6 +82,36 @@ def test_list_versions_uses_cached_snapshot_size(monkeypatch, tmp_path: Path) ->
 
     assert versions[0]["file_count"] == 42
     assert versions[0]["total_bytes"] == 123456
+
+
+def test_list_versions_page_limits_git_log_and_metadata_to_requested_page(monkeypatch, tmp_path: Path) -> None:
+    target, first_commit = _create_repo(tmp_path)
+    root = target / "repository"
+    second_commit = _append_snapshot_commit(root, "second.txt", "second")
+    third_commit = _append_snapshot_commit(root, "third.txt", "third")
+    requested_commits = []
+    cache = {
+        second_commit: {"file_count": 4, "total_bytes": 22},
+    }
+    monkeypatch.setattr(backup.repository, "get_job", lambda job_id: {"target_path": str(target)})
+    monkeypatch.setattr(
+        backup.repository,
+        "list_version_metadata",
+        lambda job_id, commits: requested_commits.extend(commits) or {key: cache[key] for key in commits if key in cache},
+    )
+    monkeypatch.setattr(backup.repository, "upsert_version_metadata", lambda *args: None)
+    monkeypatch.setattr(backup, "_version_snapshot_summary", lambda *args: (_ for _ in ()).throw(AssertionError("cache miss")))
+
+    page = backup.list_versions_page(1, limit=1, offset=1)
+
+    assert page["total"] == 3
+    assert page["limit"] == 1
+    assert page["offset"] == 1
+    assert page["has_more"] is True
+    assert [item["commit"] for item in page["items"]] == [second_commit]
+    assert requested_commits == [second_commit]
+    assert first_commit not in requested_commits
+    assert third_commit not in requested_commits
 
 
 def test_version_tree_browses_commit_snapshot(monkeypatch, tmp_path: Path) -> None:

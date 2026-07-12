@@ -2,6 +2,13 @@ const state = {
   jobs: [],
   runs: [],
   versions: [],
+  versionPage: {
+    limit: 20,
+    offset: 0,
+    total: 0,
+    hasMore: false,
+    loading: false,
+  },
   selectedJobId: null,
   page: "dashboard",
   activeRunId: null,
@@ -364,7 +371,15 @@ function renderVersionJobSelect() {
 
 function renderVersions(versions) {
   const list = $("versionsList");
-  $("versionCount").textContent = `${versions.length} 个版本`;
+  const pagination = $("versionsPagination");
+  const loadMoreButton = $("loadMoreVersionsBtn");
+  const total = Number(state.versionPage.total || versions.length);
+  $("versionCount").textContent = `${total} 个版本`;
+  $("versionsPageInfo").textContent = `已加载 ${versions.length} / ${total}`;
+  pagination.hidden = !versions.length && !state.versionPage.hasMore;
+  loadMoreButton.hidden = !state.versionPage.hasMore;
+  loadMoreButton.disabled = state.versionPage.loading;
+  loadMoreButton.textContent = state.versionPage.loading ? "加载中..." : "加载更多";
   if (!versions.length) {
     list.className = "version-list empty-state";
     list.innerHTML = `
@@ -828,16 +843,43 @@ async function loadRuns() {
   }
 }
 
-async function loadSelectedVersions() {
+function resetVersionPage() {
+  state.versionPage.offset = 0;
+  state.versionPage.total = 0;
+  state.versionPage.hasMore = false;
+  state.versionPage.loading = false;
+}
+
+async function loadSelectedVersions({ append = false, minimumCount = 0 } = {}) {
   const job = activeJob();
+  if (state.versionPage.loading) return;
   if (!job) {
     state.versions = [];
+    resetVersionPage();
     $("versionCount").textContent = "0 个版本";
+    $("versionsPagination").hidden = true;
     $("versionsList").className = "version-list empty-state";
     $("versionsList").innerHTML = `<strong>暂无任务</strong><p>先创建一个备份任务。</p>`;
     return;
   }
-  state.versions = await api(`/api/jobs/${job.id}/versions`);
+  if (!append) {
+    state.versions = [];
+    resetVersionPage();
+  }
+  const offset = append ? state.versions.length : 0;
+  const limit = append ? state.versionPage.limit : Math.min(100, Math.max(state.versionPage.limit, minimumCount));
+  state.versionPage.loading = true;
+  renderVersions(state.versions);
+  try {
+    const page = await api(`/api/jobs/${job.id}/versions?limit=${limit}&offset=${offset}`);
+    const items = Array.isArray(page.items) ? page.items : [];
+    state.versions = append ? [...state.versions, ...items] : items;
+    state.versionPage.offset = Number(page.offset || offset) + items.length;
+    state.versionPage.total = Number(page.total || state.versions.length);
+    state.versionPage.hasMore = Boolean(page.has_more);
+  } finally {
+    state.versionPage.loading = false;
+  }
   renderVersions(state.versions);
 }
 
@@ -847,7 +889,7 @@ async function syncAll() {
   setLiveStatus("正在同步状态", true);
   try {
     await Promise.all([loadJobs(), loadRuns()]);
-    if (state.page === "versions") await loadSelectedVersions();
+    if (state.page === "versions") await loadSelectedVersions({ minimumCount: state.versions.length });
     setLiveStatus(`实时同步中 · ${formatClock()}`, false);
   } catch (error) {
     setLiveStatus("同步失败，稍后重试", false);
@@ -989,6 +1031,10 @@ function bindEvents() {
   $("versionsJobSelect").addEventListener("change", (event) => {
     state.selectedJobId = Number(event.target.value);
     loadSelectedVersions().catch((error) => toast(`加载版本失败：${error.message}`));
+  });
+
+  $("loadMoreVersionsBtn").addEventListener("click", () => {
+    loadSelectedVersions({ append: true }).catch((error) => toast(`加载版本失败：${error.message}`));
   });
 
   $("jobsList").addEventListener("click", (event) => {
