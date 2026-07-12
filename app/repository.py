@@ -202,3 +202,52 @@ def list_runs(job_id: int | None = None) -> list[dict[str, Any]]:
         else:
             rows = conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 50").fetchall()
     return [row_to_dict(row) for row in rows if row is not None]
+
+
+def get_version_metadata(job_id: int, commit_hash: str) -> dict[str, int] | None:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT file_count, total_bytes
+            FROM version_metadata
+            WHERE job_id = ? AND commit_hash = ?
+            """,
+            (job_id, commit_hash),
+        ).fetchone()
+    if row is None:
+        return None
+    return {"file_count": int(row["file_count"]), "total_bytes": int(row["total_bytes"])}
+
+
+def list_version_metadata(job_id: int, commit_hashes: list[str]) -> dict[str, dict[str, int]]:
+    if not commit_hashes:
+        return {}
+    placeholders = ", ".join("?" for _ in commit_hashes)
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT commit_hash, file_count, total_bytes
+            FROM version_metadata
+            WHERE job_id = ? AND commit_hash IN ({placeholders})
+            """,
+            [job_id, *commit_hashes],
+        ).fetchall()
+    return {
+        row["commit_hash"]: {"file_count": int(row["file_count"]), "total_bytes": int(row["total_bytes"])}
+        for row in rows
+    }
+
+
+def upsert_version_metadata(job_id: int, commit_hash: str, file_count: int, total_bytes: int) -> None:
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO version_metadata (job_id, commit_hash, file_count, total_bytes)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(job_id, commit_hash) DO UPDATE SET
+              file_count = excluded.file_count,
+              total_bytes = excluded.total_bytes,
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            (job_id, commit_hash, file_count, total_bytes),
+        )

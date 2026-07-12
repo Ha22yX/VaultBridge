@@ -38,7 +38,10 @@ def _create_repo(tmp_path: Path) -> tuple[Path, str]:
 
 def test_list_versions_includes_snapshot_size(monkeypatch, tmp_path: Path) -> None:
     target, commit = _create_repo(tmp_path)
+    cache = {}
     monkeypatch.setattr(backup.repository, "get_job", lambda job_id: {"target_path": str(target)})
+    monkeypatch.setattr(backup.repository, "list_version_metadata", lambda job_id, commits: {key: cache[key] for key in commits if key in cache})
+    monkeypatch.setattr(backup.repository, "upsert_version_metadata", lambda job_id, commit_hash, file_count, total_bytes: cache.update({commit_hash: {"file_count": file_count, "total_bytes": total_bytes}}))
 
     versions = backup.list_versions(1)
 
@@ -51,6 +54,27 @@ def test_list_versions_includes_snapshot_size(monkeypatch, tmp_path: Path) -> No
             "total_bytes": len(INDEX_HTML) + len(APP_JS) + len(README_TXT),
         }
     ]
+    assert cache[commit] == {
+        "file_count": 3,
+        "total_bytes": len(INDEX_HTML) + len(APP_JS) + len(README_TXT),
+    }
+
+
+def test_list_versions_uses_cached_snapshot_size(monkeypatch, tmp_path: Path) -> None:
+    target, commit = _create_repo(tmp_path)
+    monkeypatch.setattr(backup.repository, "get_job", lambda job_id: {"target_path": str(target)})
+    monkeypatch.setattr(
+        backup.repository,
+        "list_version_metadata",
+        lambda job_id, commits: {commit: {"file_count": 42, "total_bytes": 123456}},
+    )
+    monkeypatch.setattr(backup.repository, "upsert_version_metadata", lambda *args: None)
+    monkeypatch.setattr(backup, "_version_snapshot_summary", lambda *args: (_ for _ in ()).throw(AssertionError("cache miss")))
+
+    versions = backup.list_versions(1)
+
+    assert versions[0]["file_count"] == 42
+    assert versions[0]["total_bytes"] == 123456
 
 
 def test_version_tree_browses_commit_snapshot(monkeypatch, tmp_path: Path) -> None:

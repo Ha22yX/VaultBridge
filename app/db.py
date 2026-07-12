@@ -44,6 +44,17 @@ CREATE TABLE IF NOT EXISTS runs (
   control_action TEXT NOT NULL DEFAULT 'run',
   FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS version_metadata (
+  job_id INTEGER NOT NULL,
+  commit_hash TEXT NOT NULL,
+  file_count INTEGER NOT NULL DEFAULT 0,
+  total_bytes INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(job_id, commit_hash),
+  FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+);
 """
 
 

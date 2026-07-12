@@ -812,7 +812,22 @@ def _version_snapshot_summary(root: Path, commit: str) -> dict[str, int]:
     return {"file_count": file_count, "total_bytes": total_bytes}
 
 
-def _version_log_entry(root: Path, commit: str) -> dict[str, Any]:
+def _cached_version_snapshot_summary(job_id: int, root: Path, commit: str) -> dict[str, int]:
+    safe_commit = _safe_commit_ref(commit)
+    cached = repository.get_version_metadata(job_id, safe_commit)
+    if cached is not None:
+        return cached
+    summary = _version_snapshot_summary(root, safe_commit)
+    repository.upsert_version_metadata(
+        job_id,
+        safe_commit,
+        int(summary["file_count"]),
+        int(summary["total_bytes"]),
+    )
+    return summary
+
+
+def _version_log_entry(job_id: int, root: Path, commit: str) -> dict[str, Any]:
     result = _run_git(
         ["log", "-1", "--pretty=format:%H%x09%ad%x09%s", "--date=format:%Y-%m-%d %H:%M:%S", _safe_commit_ref(commit)],
         root,
@@ -822,7 +837,7 @@ def _version_log_entry(root: Path, commit: str) -> dict[str, Any]:
         "commit": full_commit,
         "date": date,
         "subject": subject,
-        **_version_snapshot_summary(root, full_commit),
+        **_cached_version_snapshot_summary(job_id, root, full_commit),
     }
 
 
@@ -838,15 +853,29 @@ def list_versions(job_id: int) -> list[dict[str, Any]]:
     )
     if result.returncode != 0 or not result.stdout.strip():
         return []
-    versions = []
+    log_entries = []
     for line in result.stdout.splitlines():
         commit, date, subject = line.split("\t", 2)
+        log_entries.append((commit, date, subject))
+
+    cached_summaries = repository.list_version_metadata(job_id, [entry[0] for entry in log_entries])
+    versions = []
+    for commit, date, subject in log_entries:
+        summary = cached_summaries.get(commit)
+        if summary is None:
+            summary = _version_snapshot_summary(root, commit)
+            repository.upsert_version_metadata(
+                job_id,
+                commit,
+                int(summary["file_count"]),
+                int(summary["total_bytes"]),
+            )
         versions.append(
             {
                 "commit": commit,
                 "date": date,
                 "subject": subject,
-                **_version_snapshot_summary(root, commit),
+                **summary,
             }
         )
     return versions
@@ -857,7 +886,7 @@ def get_version_detail(job_id: int, commit: str) -> dict[str, Any]:
     root = repo_root(job)
     if not (root / ".git").exists():
         raise BackupError("No Git repository exists for this job yet")
-    return _version_log_entry(root, commit)
+    return _version_log_entry(job_id, root, commit)
 
 
 def list_version_tree(job_id: int, commit: str, path: str = "") -> dict[str, Any]:
@@ -931,7 +960,7 @@ def _run_archive_task(task_id: str, job_id: int, commit: str) -> None:
     archives.mkdir(parents=True, exist_ok=True)
     output = archives / f"vaultbridge-{safe_commit[:12]}.zip"
     partial = archives / f".vaultbridge-{safe_commit[:12]}-{task_id}.zip.part"
-    summary = _version_snapshot_summary(root, safe_commit)
+    summary = _cached_version_snapshot_summary(job_id, root, safe_commit)
     total_bytes = int(summary.get("total_bytes") or 0)
     total_files = int(summary.get("file_count") or 0)
 
