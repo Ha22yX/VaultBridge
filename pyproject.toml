@@ -5,12 +5,14 @@ description = "A simple web panel for read-only SSH backups into a Git-versioned
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "apscheduler>=3.10.4",
-  "cryptography>=42.0.0",
-  "fastapi>=0.115.0",
-  "paramiko>=3.4.0",
-  "pydantic>=2.7.0",
-  "uvicorn[standard]>=0.30.0"
+  "apscheduler==3.11.3",
+  "bcrypt==5.0.0",
+  "cryptography==49.0.0",
+  "fastapi==0.139.0",
+  "paramiko==5.0.0",
+  "pydantic==2.13.4",
+  "pynacl==1.6.2",
+  "uvicorn[standard]==0.51.0"
 ]
 
 [project.optional-dependencies]
@@ -21,4 +23,3 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-
