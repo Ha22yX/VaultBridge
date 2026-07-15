@@ -329,6 +329,39 @@ def cleanup_windows_reparse_points(root: Path) -> None:
             shutil.rmtree(path, ignore_errors=True)
 
 
+def _ensure_owner_permissions(path: Path) -> None:
+    try:
+        mode = path.lstat().st_mode
+    except OSError as exc:
+        raise BackupError(f"Cannot inspect snapshot path before Git commit: {path}") from exc
+    if stat.S_ISLNK(mode):
+        return
+    current = stat.S_IMODE(mode)
+    required = stat.S_IRUSR | stat.S_IWUSR
+    if stat.S_ISDIR(mode):
+        required |= stat.S_IXUSR
+    wanted = current | required
+    if wanted == current:
+        return
+    try:
+        path.chmod(wanted)
+    except OSError as exc:
+        raise BackupError(f"Cannot make snapshot path readable before Git commit: {path}") from exc
+
+
+def prepare_snapshot_for_git(snapshot: Path) -> None:
+    if not snapshot.exists():
+        return
+    _ensure_owner_permissions(snapshot)
+    for current, directories, files in os.walk(snapshot):
+        current_path = Path(current)
+        _ensure_owner_permissions(current_path)
+        for directory in directories:
+            _ensure_owner_permissions(current_path / directory)
+        for file_name in files:
+            _ensure_owner_permissions(current_path / file_name)
+
+
 def cleanup_stale_top_level(root: Path, expected_paths: set[Path]) -> None:
     if not root.exists():
         return
@@ -740,11 +773,13 @@ def run_backup(job_id: int) -> dict[str, str | int]:
         repository.update_run_progress(
             run_id,
             phase="committing",
-            message="Writing Git commit",
+            message="Preparing snapshot for Git commit",
             copied_files=progress.copied_files,
             copied_bytes=progress.copied_bytes,
             current_path=progress.current_path,
         )
+        prepare_snapshot_for_git(snapshot)
+        repository.update_run_progress(run_id, phase="committing", message="Writing Git commit")
         _run_git(["add", "snapshot"], root)
         status = _run_git(["status", "--porcelain"], root).stdout.strip()
         if status:

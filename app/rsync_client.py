@@ -191,6 +191,7 @@ def _rsync_base_args(*, root_files_only: bool, files_from: bool) -> list[str]:
         "--no-perms",
         "--no-owner",
         "--no-group",
+        "--chmod=Du+rwx,Fu+rw",
         "--omit-dir-times",
         "--partial",
         "--partial-dir=.rsync-partial",

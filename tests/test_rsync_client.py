@@ -72,3 +72,9 @@ def test_files_from_rsync_args_keep_directory_recursion() -> None:
     assert "-a" in args
     assert "-r" in args
     assert args.index("-r") > args.index("-a")
+
+
+def test_rsync_args_make_local_snapshot_owner_readable() -> None:
+    args = _rsync_base_args(root_files_only=False, files_from=False)
+
+    assert "--chmod=Du+rwx,Fu+rw" in args
